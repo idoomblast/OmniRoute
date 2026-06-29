@@ -68,9 +68,9 @@ export const EmbeddingProviderListingSchema = z.object({
           id: z.string(), // `provider/model`
           name: z.string(),
           dimensions: z.number().nullable(),
-        }),
+        })
       ),
-    }),
+    })
   ),
 });
 
@@ -123,7 +123,7 @@ export const RetrievePreviewResultSchema = z.object({
       tier: z.enum(["fts5", "vector", "hybrid-rrf", "qdrant"]),
       vecScore: z.number().nullable(),
       ftsScore: z.number().nullable(),
-    }),
+    })
   ),
   resolution: z.object({
     embeddingSource: z.enum(["remote", "static", "transformers"]).nullable(),
