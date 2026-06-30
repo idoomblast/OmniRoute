@@ -956,7 +956,7 @@ export class BaseExecutor {
           !activeCredentials?.apiKey;
 
         if (
-          this.provider === "claude" &&
+          (this.provider === "claude" || isClaudeCodeCompatible(this.provider)) &&
           (isClaudeCodeClient || hasClaudeOAuthToken) &&
           typeof transformedBody === "object" &&
           transformedBody !== null
