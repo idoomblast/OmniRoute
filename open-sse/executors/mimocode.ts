@@ -219,6 +219,10 @@ export class MimocodeExecutor extends BaseExecutor {
       expiresAt: 0,
       cooldownUntil: 0,
       consecutiveFails: 0,
+      // #3837/#5521 backward compat: default the per-account proxy to null (not undefined),
+      // mirroring the syncAccountsFromCredentials() account builder, so an executor with no
+      // accountProxies config still exposes `acct.proxy === null` on every account.
+      proxy: null,
     });
   }
 
