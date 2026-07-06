@@ -228,7 +228,8 @@ export const DEFAULT_API_LIMITS = {
 export const SKIP_PATTERNS = ["Please write a 5-10 word title for the following conversation:"];
 
 // Default maximum number of tools allowed in a request (OpenAI default)
-export const MAX_TOOLS_LIMIT = 128;
+// Override with env var MAX_TOOLS_LIMIT (e.g. MAX_TOOLS_LIMIT=512)
+export const MAX_TOOLS_LIMIT = Number(process.env.MAX_TOOLS_LIMIT) || 256;
 
 // ── Credential Health Check ────────────────────────────────────────
 
