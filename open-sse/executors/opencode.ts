@@ -1,5 +1,5 @@
 import { BaseExecutor, type ExecuteInput, type ProviderCredentials } from "./base.ts";
-import { PROVIDERS } from "../config/constants.ts";
+import { PROVIDERS, MAX_TOOLS_LIMIT } from "../config/constants.ts";
 import { getModelTargetFormat } from "../config/providerModels.ts";
 import {
   injectReasoningContentForThinkingModel,
@@ -296,9 +296,9 @@ export class OpencodeExecutor extends BaseExecutor {
       modifiedBody &&
       typeof modifiedBody === "object" &&
       Array.isArray(modifiedBody.tools) &&
-      modifiedBody.tools.length > 128
+      modifiedBody.tools.length > MAX_TOOLS_LIMIT
     ) {
-      modifiedBody.tools = modifiedBody.tools.slice(0, 128);
+      modifiedBody.tools = modifiedBody.tools.slice(0, MAX_TOOLS_LIMIT);
     }
     if (modifiedBody && typeof modifiedBody === "object" && !Array.isArray(modifiedBody)) {
       const mb = modifiedBody as Record<string, unknown>;

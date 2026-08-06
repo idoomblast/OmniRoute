@@ -1,5 +1,5 @@
 import { BaseExecutor, ExecuteInput, type ProviderCredentials } from "./base.ts";
-import { PROVIDERS, OAUTH_ENDPOINTS } from "../config/constants.ts";
+import { PROVIDERS, OAUTH_ENDPOINTS, MAX_TOOLS_LIMIT } from "../config/constants.ts";
 import { getModelTargetFormat } from "../config/providerModels.ts";
 import {
   getGitHubCopilotChatHeaders,
@@ -118,8 +118,8 @@ export class GithubExecutor extends BaseExecutor {
       delete modifiedBody.response_format;
     }
 
-    if (Array.isArray(modifiedBody.tools) && modifiedBody.tools.length > 128) {
-      modifiedBody.tools = modifiedBody.tools.slice(0, 128);
+    if (Array.isArray(modifiedBody.tools) && modifiedBody.tools.length > MAX_TOOLS_LIMIT) {
+      modifiedBody.tools = modifiedBody.tools.slice(0, MAX_TOOLS_LIMIT);
     }
 
     // GitHub Copilot's gpt-5.4 family rejects requests carrying `temperature` with HTTP 400:

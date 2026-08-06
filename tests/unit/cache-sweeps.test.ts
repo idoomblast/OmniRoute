@@ -9,7 +9,7 @@ test("toolLimitDetector: getEffectiveToolLimit returns MAX_TOOLS_LIMIT default",
   );
   clearDetectedLimits();
   const limit = getEffectiveToolLimit("nonexistent-provider");
-  assert.equal(limit, 128, "default limit should be MAX_TOOLS_LIMIT (128)");
+  assert.equal(limit, 256, "default limit should be MAX_TOOLS_LIMIT (256)");
 });
 
 test("toolLimitDetector: setDetectedToolLimit only lowers the limit", async () => {
@@ -61,8 +61,8 @@ test("toolLimitDetector: clearDetectedLimits resets all entries", async () => {
   assert.equal(getDetectedToolLimit("clear-test-a"), 10);
 
   clearDetectedLimits();
-  assert.equal(getDetectedToolLimit("clear-test-a"), 128, "should revert to default");
-  assert.equal(getDetectedToolLimit("clear-test-b"), 128, "should revert to default");
+  assert.equal(getDetectedToolLimit("clear-test-a"), 256, "should revert to default");
+  assert.equal(getDetectedToolLimit("clear-test-b"), 256, "should revert to default");
 });
 
 // ─── codexQuotaFetcher: connectionRegistry bounds ────────────────────────────
