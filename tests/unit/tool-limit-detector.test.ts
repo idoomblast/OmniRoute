@@ -30,9 +30,9 @@ describe("toolLimitDetector", () => {
   });
 
   it("should return default limit when no cached value", () => {
-    assert.strictEqual(getEffectiveToolLimit("openai"), 128);
-    assert.strictEqual(getEffectiveToolLimit(null), 128);
-    assert.strictEqual(getEffectiveToolLimit(undefined), 128);
+    assert.strictEqual(getEffectiveToolLimit("openai"), 256);
+    assert.strictEqual(getEffectiveToolLimit(null), 256);
+    assert.strictEqual(getEffectiveToolLimit(undefined), 256);
   });
 
   it("should return proactive known limit for grok-cli", () => {
@@ -46,7 +46,7 @@ describe("toolLimitDetector", () => {
   });
 
   it("should keep getEffectiveToolLimit contract for default, proactive, and detected limits", () => {
-    assert.strictEqual(getEffectiveToolLimit("openai"), 128);
+    assert.strictEqual(getEffectiveToolLimit("openai"), 256);
     assert.strictEqual(getEffectiveToolLimit("grok-cli"), 200);
     setDetectedToolLimit("openai", 100);
     assert.strictEqual(getEffectiveToolLimit("openai"), 100);
@@ -113,8 +113,8 @@ describe("toolLimitDetector", () => {
     assert.strictEqual(getEffectiveToolLimit("nvidia"), 1536);
   });
 
-  it("should still return default (128) for unknown providers", () => {
-    assert.strictEqual(getEffectiveToolLimit("some-new-provider"), 128);
+  it("should still return default (256) for unknown providers", () => {
+    assert.strictEqual(getEffectiveToolLimit("some-new-provider"), 256);
   });
 
   it("should detect tool limit errors for 400 status", () => {

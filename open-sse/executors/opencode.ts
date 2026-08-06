@@ -4,7 +4,7 @@ import {
   type ExecutorExecuteResult,
   type ProviderCredentials,
 } from "./base.ts";
-import { PROVIDERS } from "../config/constants.ts";
+import { PROVIDERS, MAX_TOOLS_LIMIT } from "../config/constants.ts";
 import { getModelTargetFormat, stripOpencodeModelPrefix } from "../config/providerModels.ts";
 import {
   injectReasoningContentForThinkingModel,
@@ -1423,6 +1423,9 @@ export class OpencodeExecutor extends BaseExecutor {
       const format = this._requestFormat ?? resolveOpencodeTargetFormat(this.provider, model);
       if (format !== "openai" || mb.stream !== true) {
         delete mb.stream_options;
+      }
+      if (Array.isArray(mb.tools) && mb.tools.length > MAX_TOOLS_LIMIT) {
+        mb.tools = mb.tools.slice(0, MAX_TOOLS_LIMIT);
       }
       const parsed = parseEffortLevel(model);
       if (parsed) {
