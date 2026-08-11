@@ -89,6 +89,13 @@ CURSOR_RUNNABLE_BASE="$(read_json_field "${BASE_PORT}" "/api/cli-tools/runtime/c
 assert_equals "runner-base cursor installed" "false" "${CURSOR_INSTALLED_BASE}"
 assert_equals "runner-base cursor runnable" "false" "${CURSOR_RUNNABLE_BASE}"
 
+# qodercli must NOT ship in the lean runner-base image (qoder PAT transport only
+# in runner-cli, where the binary is preinstalled)
+QODER_INSTALLED_BASE="$(read_json_field "${BASE_PORT}" "/api/cli-tools/runtime/qoder" '.installed')"
+QODER_RUNNABLE_BASE="$(read_json_field "${BASE_PORT}" "/api/cli-tools/runtime/qoder" '.runnable')"
+assert_equals "runner-base qoder installed" "false" "${QODER_INSTALLED_BASE}"
+assert_equals "runner-base qoder runnable" "false" "${QODER_RUNNABLE_BASE}"
+
 for tool in cline roo continue; do
   INSTALLED="$(read_json_field "${BASE_PORT}" "/api/cli-tools/runtime/${tool}" '.installed')"
   RUNNABLE="$(read_json_field "${BASE_PORT}" "/api/cli-tools/runtime/${tool}" '.runnable')"
@@ -113,6 +120,11 @@ OPENCLAW_INSTALLED="$(read_json_field "${CLI_PORT}" "/api/cli-tools/openclaw-set
 OPENCLAW_RUNNABLE="$(read_json_field "${CLI_PORT}" "/api/cli-tools/openclaw-settings" '.runnable')"
 assert_equals "runner-cli openclaw installed" "true" "${OPENCLAW_INSTALLED}"
 assert_equals "runner-cli openclaw runnable" "true" "${OPENCLAW_RUNNABLE}"
+
+QODER_INSTALLED_CLI="$(read_json_field "${CLI_PORT}" "/api/cli-tools/runtime/qoder" '.installed')"
+QODER_RUNNABLE_CLI="$(read_json_field "${CLI_PORT}" "/api/cli-tools/runtime/qoder" '.runnable')"
+assert_equals "runner-cli qoder installed" "true" "${QODER_INSTALLED_CLI}"
+assert_equals "runner-cli qoder runnable" "true" "${QODER_RUNNABLE_CLI}"
 
 CURSOR_INSTALLED_CLI="$(read_json_field "${CLI_PORT}" "/api/cli-tools/runtime/cursor" '.installed')"
 CURSOR_RUNNABLE_CLI="$(read_json_field "${CLI_PORT}" "/api/cli-tools/runtime/cursor" '.runnable')"
