@@ -361,11 +361,16 @@ RUN --mount=type=cache,id=s/92ca8a61-c1ba-421f-a389-d48ac7258c2d-apt-cache,targe
 #   2. `codex` / `claude-code` dev pre-releases (`@next`, dist-tags) mutate
 #      API surface without notice; reproducible builds need a SHA-pinned dev
 #      build, not the floating `@latest`.
+# qodercli (@qoder-ai/qodercli) is required for the qoder PAT transport
+# (open-sse/services/qoderCli.ts) — OmniRoute spawns it to authenticate and run
+# chat turns through the local binary. The bare `qodercli` name is NOT on npm;
+# the official package is scoped under @qoder-ai.
 RUN --mount=type=cache,id=s/92ca8a61-c1ba-421f-a389-d48ac7258c2d-npm-cache,target=/root/.npm \
   npm install -g --no-audit --no-fund \
     @openai/codex@0.156.1 \
     @anthropic-ai/claude-code@2.1.260 \
     droid@0.212.0 \
-    openclaw@2026.9.1
+    openclaw@2026.9.1 \
+    @qoder-ai/qodercli
 
 USER node
