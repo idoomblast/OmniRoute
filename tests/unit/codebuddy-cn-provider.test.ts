@@ -15,6 +15,7 @@ import {
 } from "../../src/lib/oauth/constants/oauth.ts";
 import PROVIDERS_MAP from "../../src/lib/oauth/providers/index.ts";
 import { supportsTokenRefresh } from "../../open-sse/services/tokenRefresh.ts";
+import { isSupportedUsageConnection } from "../../src/lib/usage/providerLimits.ts";
 
 test("codebuddy-cn is registered as an OAuth provider in the UI catalog", () => {
   const p = AI_PROVIDERS["codebuddy-cn"];
@@ -105,7 +106,11 @@ test("CodeBuddyCnExecutor.transformRequest forces stream:true and leaves reasoni
     false,
     "plain request must not inject reasoning_effort (opt-in only)"
   );
-  assert.notEqual(body.reasoning_summary, "auto", "plain request must not inject reasoning_summary");
+  assert.notEqual(
+    body.reasoning_summary,
+    "auto",
+    "plain request must not inject reasoning_summary"
+  );
 });
 
 test("CodeBuddyCnExecutor preserves explicit reasoning_effort", () => {
@@ -136,13 +141,17 @@ test("CodeBuddyCnExecutor strips reasoning_effort when caller asks for none/off"
       false,
       `reasoning_effort must be omitted for ${effort}`
     );
-    assert.notEqual(body.reasoning_summary, "auto", `reasoning_summary must not be auto for ${effort}`);
+    assert.notEqual(
+      body.reasoning_summary,
+      "auto",
+      `reasoning_summary must not be auto for ${effort}`
+    );
   }
 });
 
 test("codebuddy-cn OAuth provider is wired with device_code flow and GET-poll on state", async () => {
   assert.equal(OAUTH_PROVIDER_IDS.CODEBUDDY_CN, "codebuddy-cn");
-  const map = (PROVIDERS_MAP as Record<string, any>);
+  const map = PROVIDERS_MAP as Record<string, any>;
   const cb = map["codebuddy-cn"];
   assert.ok(cb, "PROVIDERS map must include 'codebuddy-cn'");
   assert.equal(cb.flowType, "device_code");
@@ -187,9 +196,7 @@ test("codebuddy-cn token refresh handler is wired in tokenRefresh.ts", () => {
 
 test("codebuddy-cn is in USAGE_SUPPORTED_PROVIDERS and quota handler parses Tencent accounts", async () => {
   assert.ok(USAGE_SUPPORTED_PROVIDERS.includes("codebuddy-cn"));
-  const { getCodeBuddyCnUsage } = await import(
-    "../../open-sse/services/usage/codebuddy-cn.ts"
-  );
+  const { getCodeBuddyCnUsage } = await import("../../open-sse/services/usage/codebuddy-cn.ts");
 
   const origFetch = globalThis.fetch;
   // Compose a mixed payload: one refill (CycleEndTime << DeductionEndTime) and
@@ -265,5 +272,29 @@ test("codebuddy-cn is treated as a managed dual-auth provider (oauth + apikey ac
   assert.ok(
     FREE_APIKEY_PROVIDER_IDS.has("codebuddy-cn"),
     "codebuddy-cn must be admitted by the dual-auth gate"
+  );
+});
+
+test("codebuddy-cn apikey connection is supported by provider limits usage fetch", () => {
+  // Regression guard: the provider must be listed in PROVIDER_LIMITS_APIKEY_PROVIDERS
+  // so isSupportedUsageConnection() does not reject API-key connections with
+  // HTTP 400 "Usage not available for this connection" before the quota fetcher runs.
+  assert.equal(
+    isSupportedUsageConnection({
+      id: "cbcn-apikey-test",
+      provider: "codebuddy-cn",
+      authType: "apikey",
+    }),
+    true,
+    "apikey codebuddy-cn connection must be eligible for usage fetch"
+  );
+  assert.equal(
+    isSupportedUsageConnection({
+      id: "cbcn-oauth-test",
+      provider: "codebuddy-cn",
+      authType: "oauth",
+    }),
+    true,
+    "oauth codebuddy-cn connection must remain eligible for usage fetch"
   );
 });
