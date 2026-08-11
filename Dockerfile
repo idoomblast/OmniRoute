@@ -249,7 +249,17 @@ RUN --mount=type=cache,id=apt-cache,target=/var/cache/apt,sharing=locked \
 # (open-sse/services/qoderCli.ts) — OmniRoute spawns it to authenticate and run
 # chat turns through the local binary. The bare `qodercli` name is NOT on npm;
 # the official package is scoped under @qoder-ai.
+#
+# npm >= 11.6 blocks package install scripts not covered by allowScripts
+# (supply-chain hardening). These CLIs are shipped BY DESIGN and their
+# postinstall hooks are part of the tool: claude-code downloads its native
+# binary, qodercli pulls ripgrep/worker assets, sharp its prebuilt libvips,
+# openclaw its bundled plugins, droid its native helper. Without
+# --allow-scripts the CLIs install but fail at runtime (e.g. "claude native
+# binary not installed"). The allowlist is explicit — everything else stays
+# blocked.
 RUN --mount=type=cache,id=npm-cache,target=/root/.npm \
-  npm install -g --no-audit --no-fund @openai/codex @anthropic-ai/claude-code droid openclaw@latest @qoder-ai/qodercli
+  npm install -g --no-audit --no-fund --allow-scripts=@anthropic-ai/claude-code,@qoder-ai/qodercli,droid,openclaw,sharp,@google/genai,tree-sitter-bash,protobufjs \
+    @openai/codex @anthropic-ai/claude-code droid openclaw@latest @qoder-ai/qodercli
 
 USER node
