@@ -245,7 +245,11 @@ RUN --mount=type=cache,id=apt-cache,target=/var/cache/apt,sharing=locked \
   && git config --system url."https://github.com/".insteadOf "ssh://git@github.com/"
 
 # Install CLI tools globally. Separate layer from apt for better cache reuse.
+# qodercli (@qoder-ai/qodercli) is required for the qoder PAT transport
+# (open-sse/services/qoderCli.ts) — OmniRoute spawns it to authenticate and run
+# chat turns through the local binary. The bare `qodercli` name is NOT on npm;
+# the official package is scoped under @qoder-ai.
 RUN --mount=type=cache,id=npm-cache,target=/root/.npm \
-  npm install -g --no-audit --no-fund @openai/codex @anthropic-ai/claude-code droid openclaw@latest
+  npm install -g --no-audit --no-fund @openai/codex @anthropic-ai/claude-code droid openclaw@latest @qoder-ai/qodercli
 
 USER node
