@@ -340,14 +340,15 @@ test("QoderExecutor: non-stream calls target DashScope for non-PAT tokens and ma
   }
 });
 
-test("QoderExecutor: PAT completions never touch the (dead) Cosy HTTP endpoints", async () => {
+test("QoderExecutor: PAT falls back to qodercli when the COSY HTTP path fails", async () => {
   await withStubQoderCli(async () => {
     const executor = new QoderExecutor();
     const originalFetch = globalThis.fetch;
     let fetchCalls = 0;
-    globalThis.fetch = async (...args) => {
+    globalThis.fetch = async () => {
       fetchCalls++;
-      return originalFetch(...(args as Parameters<typeof fetch>));
+      // Fail the exchange deterministically — no live upstream in unit tests.
+      return new Response("denied", { status: 401 });
     };
     try {
       const { response } = await executor.execute({
@@ -357,8 +358,9 @@ test("QoderExecutor: PAT completions never touch the (dead) Cosy HTTP endpoints"
         credentials: { apiKey: "pt-0pUI-test-token" },
       });
       assert.equal(response.status, 200);
-      // No HTTP at all: PATs are served entirely by the local qodercli binary.
-      assert.equal(fetchCalls, 0);
+      // New contract: PATs prefer the pure-HTTP COSY path (exchange attempt
+      // happens), then fall back to the local qodercli binary.
+      assert.ok(fetchCalls >= 1, "PAT should attempt the COSY HTTP path first");
     } finally {
       globalThis.fetch = originalFetch;
     }
