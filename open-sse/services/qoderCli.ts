@@ -11,7 +11,7 @@ export { getQoderCliCommand } from "./qoderCliResolve"; // #6263 public entry po
 const DEFAULT_TIMEOUT_MS = 45_000;
 const DEFAULT_MODELS_TIMEOUT_MS = 20_000;
 const QODER_DEFAULT_MODEL = "qwen3.8-max-preview";
-const QODER_MODEL_LEVELS = {
+export const QODER_MODEL_LEVELS = {
   "qwen3.8-max-preview": "qmodel_preview",
   "qwen3.7-max": "qmodel_latest",
   "qwen3.7-plus": "qmodel",
