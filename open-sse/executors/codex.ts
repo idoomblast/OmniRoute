@@ -1439,6 +1439,24 @@ export class CodexExecutor extends BaseExecutor {
     }
     delete body.reasoning_effort;
 
+    // Codex /responses rejects the `enabled` sub-field inside `reasoning`
+    // (HTTP 400 "Unknown parameter: 'reasoning.enabled'" on gpt-5.x models).
+    // OpenCode-style clients send `reasoning: { enabled: true, ... }`, but the
+    // Codex wire format only accepts `effort` + `summary`. Strip it here for
+    // BOTH the native passthrough and the translated path (this runs before
+    // the passthrough early return below). If nothing is left after the strip,
+    // drop the whole `reasoning` object instead of sending an empty one.
+    const codexReasoning =
+      body.reasoning && typeof body.reasoning === "object" && !Array.isArray(body.reasoning)
+        ? (body.reasoning as Record<string, unknown>)
+        : null;
+    if (codexReasoning) {
+      delete codexReasoning.enabled;
+      if (Object.keys(codexReasoning).length === 0) {
+        delete body.reasoning;
+      }
+    }
+
     // Remove unsupported token limit parameters BEFORE the passthrough return.
     // Codex API rejects both max_tokens and max_output_tokens regardless of
     // whether the request came via native passthrough or translation.
