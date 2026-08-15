@@ -237,11 +237,12 @@ export const providerChatCompletionSchema = z
     input: z.union([nonEmptyStringSchema, z.array(z.unknown()).min(1)]).optional(),
     prompt: nonEmptyStringSchema.optional(),
     // Canonical, provider-agnostic reasoning controls (#6241). `effort` reuses the shared
-    // none/low/medium/high/xhigh vocabulary (UI tiers extra/max collapse onto xhigh);
-    // `thinking` is a simple boolean toggle. Both are optional and normalized onto the
-    // per-provider reasoning fields (reasoning_effort / reasoning.effort / thinking) by
-    // normalizeReasoningRequest before translation — an explicit client reasoning_effort /
-    // reasoning / object-shaped thinking always wins. See
+    // none/low/medium/high/xhigh vocabulary plus the GPT-5.6-native literal `max` (UI tier
+    // synonym `extra` collapses onto xhigh; `max` is preserved and demoted to xhigh at the
+    // wire for models that don't support it); `thinking` is a simple boolean toggle. Both
+    // are optional and normalized onto the per-provider reasoning fields (reasoning_effort /
+    // reasoning.effort / thinking) by normalizeReasoningRequest before translation — an
+    // explicit client reasoning_effort / reasoning / object-shaped thinking always wins. See
     // @/shared/reasoning/effortStandardization.
     effort: effortRequestSchema.optional(),
     thinking: thinkingRequestSchema.optional(),

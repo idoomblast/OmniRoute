@@ -415,6 +415,7 @@ function normalizeServiceTierValue(value: unknown): string | undefined {
  * Update this table when Codex releases new models with different caps.
  */
 const MAX_EFFORT_BY_MODEL: Record<string, EffortLevel> = {
+  "gpt-5.6": "max",
   "gpt-5.6-sol": "ultra",
   "gpt-5.6-terra": "ultra",
   "gpt-5.6-luna": "max",

@@ -154,7 +154,19 @@ export function supportsMaxEffortForProvider(provider: string, model: string): b
   const isOllamaCloud = provider === "ollama-cloud";
   const isMoonshotK3 =
     (provider === "moonshot" || provider === "kimi") && /^kimi-k3(?:$|-)/i.test(model);
-  return isClaude || isOpencodeGoDeepSeek || isOllamaCloud || isMoonshotK3;
+  // GPT-5.6 (Codex OAuth + public OpenAI API /v1/responses) natively accepts literal
+  // max. Model-scoped to the GPT-5.6 family (bare `gpt-5.6`, -sol/-terra/-luna, and
+  // their -max/-ultra alias forms) — GPT-5.5 and earlier top at xhigh and must keep
+  // normalizing max → xhigh.
+  const isGpt56NativeMax =
+    (provider === "openai" || provider === "codex") &&
+    /^gpt-5\.6(?:-(?:sol|terra|luna))?(?:-(?:none|low|medium|high|xhigh|max|ultra))?$/i.test(
+      model
+        .trim()
+        .toLowerCase()
+        .replace(/^(?:openai|codex|cx)\//, "")
+    );
+  return isClaude || isOpencodeGoDeepSeek || isOllamaCloud || isMoonshotK3 || isGpt56NativeMax;
 }
 
 // ── Effort carrier helpers (#7044) ──────────────────────────────────────────
@@ -216,10 +228,7 @@ function writeEffortValue(
 }
 
 /** Strip the effort field from every carrier that was present. */
-function stripEffortValue(
-  b: Record<string, unknown>,
-  c: EffortCarriers
-): Record<string, unknown> {
+function stripEffortValue(b: Record<string, unknown>, c: EffortCarriers): Record<string, unknown> {
   const next: Record<string, unknown> = { ...b };
   if (c.hasTopLevelReasoningEffort) delete next.reasoning_effort;
   if (c.hasReasoningEffort && c.reasoning) {

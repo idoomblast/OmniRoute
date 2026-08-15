@@ -9,15 +9,10 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-effort-6241-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const {
-  CANONICAL_EFFORT_VALUES,
-  normalizeEffort,
-  effortRequestSchema,
-  normalizeReasoningRequest,
-} = await import("../../src/shared/reasoning/effortStandardization.ts");
-const { providerChatCompletionSchema } = await import(
-  "../../src/shared/validation/schemas/apiV1.ts"
-);
+const { CANONICAL_EFFORT_VALUES, normalizeEffort, effortRequestSchema, normalizeReasoningRequest } =
+  await import("../../src/shared/reasoning/effortStandardization.ts");
+const { providerChatCompletionSchema } =
+  await import("../../src/shared/validation/schemas/apiV1.ts");
 const core = await import("../../src/lib/db/core.ts");
 const modelsDevSync = await import("../../src/lib/modelsDevSync.ts");
 const registry = await import("../../src/lib/modelMetadataRegistry.ts");
@@ -59,9 +54,9 @@ test("schema still accepts the existing object-shaped thinking config (back-comp
   assert.deepEqual(parsed.thinking, { type: "enabled", budget_tokens: 2048 });
 });
 
-test("schema normalizes UI tier synonyms (extra/max) onto xhigh, rejects garbage", () => {
+test("schema normalizes extra onto xhigh, preserves max (GPT-5.6-native), rejects garbage", () => {
   assert.equal(effortRequestSchema.parse("extra"), "xhigh");
-  assert.equal(effortRequestSchema.parse("MAX"), "xhigh");
+  assert.equal(effortRequestSchema.parse("MAX"), "max");
   assert.equal(effortRequestSchema.parse("medium"), "medium");
   assert.throws(() => effortRequestSchema.parse("turbo"));
 });
@@ -72,7 +67,7 @@ test("normalizeEffort maps canonical + aliases, ignores unknown", () => {
   assert.equal(normalizeEffort("high"), "high");
   assert.equal(normalizeEffort("HIGH"), "high");
   assert.equal(normalizeEffort("extra"), "xhigh");
-  assert.equal(normalizeEffort("max"), "xhigh");
+  assert.equal(normalizeEffort("max"), "max");
   assert.equal(normalizeEffort("none"), "none");
   assert.equal(normalizeEffort("turbo"), undefined);
   assert.equal(normalizeEffort(3), undefined);
@@ -100,11 +95,12 @@ test("canonical thinking boolean is preserved as the truthy toggle", () => {
   assert.equal(out.thinking, true);
 });
 
-test("Extra / Max collapse to xhigh through the normalizer", () => {
+test("Extra collapses to xhigh; Max preserved as max (wire sanitizer demotes non-GPT-5.6)", () => {
   const extra = normalizeReasoningRequest({ effort: "extra" }) as Record<string, unknown>;
   assert.equal(extra.reasoning_effort, "xhigh");
   const max = normalizeReasoningRequest({ effort: "Max" }) as Record<string, unknown>;
-  assert.equal(max.reasoning_effort, "xhigh");
+  assert.equal(max.reasoning_effort, "max");
+  assert.equal((max.reasoning as Record<string, unknown>).effort, "max");
 });
 
 test("explicit client reasoning_effort is NOT overwritten by canonical effort", () => {
