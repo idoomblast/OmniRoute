@@ -55,3 +55,17 @@ for (const tier of ["low", "medium", "high"]) {
     assert.equal(p.cache_creation, 1.5);
   });
 }
+
+// Gemini 3.7 Flash (live on the IDE 2.8.1 catalog) ships the same tier set as 3.6
+// and reuses its pricing — without rows, cost / quota calculations fall back to $0.
+for (const tier of ["low", "medium", "high"]) {
+  test(`ag/gemini-3.7-flash-${tier} has a non-null pricing row`, () => {
+    const p = getDefaultPricing().ag[`gemini-3.7-flash-${tier}`];
+    assert.ok(p, `expected a pricing row for ag/gemini-3.7-flash-${tier}`);
+    assert.equal(p.input, 1.5);
+    assert.equal(p.output, 7.5);
+    assert.equal(p.cached, 0.15);
+    assert.equal(p.reasoning, 7.5);
+    assert.equal(p.cache_creation, 1.5);
+  });
+}

@@ -5,8 +5,11 @@ const ANTIGRAVITY_CLI_RELEASE_URL =
 
 export const ANTIGRAVITY_VERSION_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 export const ANTIGRAVITY_VERSION_FETCH_TIMEOUT_MS = 5_000;
-export const ANTIGRAVITY_IDE_FALLBACK_VERSION = "2.1.1";
-export const ANTIGRAVITY_CLI_FALLBACK_VERSION = "1.1.5";
+// 2.8.1 is the first client version whose identity exposes Gemini 3.7 Flash on
+// :fetchAvailableModels (live-verified 2026-08-17). The public updater feed still
+// lags behind (max 2.0.0), so the fallback floor is what actually reaches the wire.
+export const ANTIGRAVITY_IDE_FALLBACK_VERSION = "2.8.1";
+export const ANTIGRAVITY_CLI_FALLBACK_VERSION = "1.1.13";
 
 type VersionCache = {
   fetchedAt: number;

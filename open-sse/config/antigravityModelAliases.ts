@@ -1,4 +1,33 @@
 export const ANTIGRAVITY_PUBLIC_MODELS = Object.freeze([
+  // Gemini 3.7 Flash tiers returned by the live model selector only for the IDE 2.8.1
+  // client identity (older identities do not see them on :fetchAvailableModels).
+  {
+    id: "gemini-3.7-flash-high",
+    name: "Gemini 3.7 Flash (High)",
+    contextLength: 1048576,
+    maxOutputTokens: 65536,
+    supportsReasoning: true,
+    supportsVision: true,
+    toolCalling: true,
+  },
+  {
+    id: "gemini-3.7-flash-medium",
+    name: "Gemini 3.7 Flash (Medium)",
+    contextLength: 1048576,
+    maxOutputTokens: 65536,
+    supportsReasoning: true,
+    supportsVision: true,
+    toolCalling: true,
+  },
+  {
+    id: "gemini-3.7-flash-low",
+    name: "Gemini 3.7 Flash (Low)",
+    contextLength: 1048576,
+    maxOutputTokens: 65536,
+    supportsReasoning: true,
+    supportsVision: true,
+    toolCalling: true,
+  },
   // Gemini 3.6 Flash tiers returned by the live model selector for both the IDE 2.1.1
   // and CLI 1.1.x client identities. High is the current defaultAgentModelId.
   {
