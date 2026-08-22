@@ -43,6 +43,12 @@ const REASONING_REPLAY_PROVIDERS = new Set([
   // 400s with "Param Incorrect: The reasoning_content in the thinking mode
   // must be passed back to the API."
   "xiaomi-mimo",
+  // b.ai proxies deepseek-v4-flash in thinking mode (default ON) — it enforces
+  // the same strict multi-turn contract: assistant messages with tool_calls
+  // MUST carry reasoning_content back, otherwise B.AI 400s (sometimes masked
+  // as "Input token exceed the limit"). Replay is required for multi-turn
+  // tool-calling agents (Hermes/OpenCode) routing through OmniRoute.
+  "bai",
 ]);
 
 const REASONING_REPLAY_MODEL_PATTERNS = [

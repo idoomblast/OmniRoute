@@ -428,6 +428,31 @@ describe("Reasoning Replay Cache — Provider Detection", () => {
     assert.equal(requiresReasoningReplay({ provider: "opencode-go", model: "some-model" }), true);
   });
 
+  it("should detect bai as requiring replay for deepseek-v4-flash", () => {
+    // b.ai proxies deepseek-v4-flash in thinking mode (default ON) and enforces
+    // the same strict reasoning_content pass-back contract as DeepSeek/Kimi.
+    // Regression: multi-turn tool-calling agents (Hermes/OpenCode) 400'd with
+    // "reasoning_content must be passed back" (sometimes masked as
+    // "Input token exceed the limit") before bai was added to the replay set.
+    assert.equal(
+      requiresReasoningReplay({
+        provider: "bai",
+        model: "deepseek-v4-flash",
+        thinkingEnabled: true,
+      }),
+      true
+    );
+    assert.equal(
+      requiresReasoningReplay({
+        provider: "bai",
+        model: "deepseek-v4-flash",
+        thinkingEnabled: false,
+      }),
+      true
+    );
+    assert.equal(requiresReasoningReplay({ provider: "bai", model: "deepseek-v4-pro" }), true);
+  });
+
   it("should not replay legacy deepseek-r1 even under replay providers", () => {
     assert.equal(requiresReasoningReplay({ provider: "siliconflow", model: "deepseek-r1" }), false);
   });
