@@ -2,7 +2,11 @@
 // Extracted verbatim from base.ts. Deps are config/services only (no host import → no cycle).
 import { PROVIDER_CLAUDE } from "../../services/systemTransforms.ts";
 import { isClaudeCodeCompatible } from "../../services/provider.ts";
-import { supportsClaudeMaxEffort, supportsXHighEffort } from "../../config/providerModels.ts";
+import {
+  getSupportedThinkingEfforts,
+  supportsClaudeMaxEffort,
+  supportsXHighEffort,
+} from "../../config/providerModels.ts";
 
 /**
  * Sanitize reasoning_effort for providers that don't accept all values.
@@ -39,6 +43,9 @@ export const MISTRAL_NO_REASONING_EFFORT_PATTERN = /devstral/i;
 export const GITHUB_REASONING_EFFORT_OPT_IN_PATTERN = /claude[-_.]?(?:opus|sonnet)[-_.]?4[-_.]6/i;
 export const GITHUB_NO_REASONING_EFFORT_PATTERN = /(claude|haiku|oswe)/i;
 const NVIDIA_GLM_52_PATTERN = /z-ai\/glm-5\.2\b/i;
+function isStrictReasoningModel(provider: string, model: string): boolean {
+  return getSupportedThinkingEfforts(provider, model)?.join(",") === "low,high,max";
+}
 
 type ReasoningSanitizeLog = {
   info?: (tag: string, msg: string) => void;
@@ -258,10 +265,30 @@ export function sanitizeReasoningEffortForProvider(
 
   if (!body || typeof body !== "object" || Array.isArray(body)) return body;
   const b = body as Record<string, unknown>;
-  const c = readEffortCarriers(b);
-  if (c.effort === undefined) return body;
-  const effortStr = typeof c.effort === "string" ? c.effort.toLowerCase() : "";
   const modelStr = model || "";
+  const c = readEffortCarriers(b);
+  if (c.effort === undefined) {
+    if (!isStrictReasoningModel(provider, modelStr)) return body;
+    log?.info?.(
+      "REASONING_SANITIZE",
+      `${provider}/${modelStr}: injected mandatory reasoning_effort high`
+    );
+    return { ...b, reasoning_effort: "high" };
+  }
+  const effortStr = typeof c.effort === "string" ? c.effort.toLowerCase() : "";
+
+  if (isStrictReasoningModel(provider, modelStr)) {
+    const mappedEffort =
+      effortStr === "medium" ? "high" : effortStr === "xhigh" ? "max" : effortStr;
+    if (["low", "high", "max"].includes(mappedEffort)) {
+      return mappedEffort === effortStr ? body : writeEffortValue(b, mappedEffort, c);
+    }
+    log?.info?.(
+      "REASONING_SANITIZE",
+      `${provider}/${modelStr}: replaced unsupported reasoning_effort ${effortStr} with high`
+    );
+    return writeEffortValue(b, "high", c);
+  }
 
   const githubOptIn =
     provider === "github" && GITHUB_REASONING_EFFORT_OPT_IN_PATTERN.test(modelStr);
