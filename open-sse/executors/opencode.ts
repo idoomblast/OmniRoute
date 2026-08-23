@@ -39,6 +39,7 @@ const OPENCODE_COOLDOWN_BASE_MS = 5_000;
 const OPENCODE_COOLDOWN_MAX_MS = 60_000;
 
 const EFFORT_LEVELS = ["low", "medium", "high", "max"] as const;
+const OX_ALPHA_EFFORT_LEVELS = ["low", "high", "max"] as const;
 
 /**
  * Models on opencode-go that support effort-tier aliases. Each entry maps the
@@ -56,6 +57,7 @@ const EFFORT_LEVELS = ["low", "medium", "high", "max"] as const;
  *   kimi-k3 max; qwen3.6-plus / qwen3.7-max / qwen3.7-plus high/max
  */
 const EFFORT_TIERS: Record<string, readonly string[]> = {
+  "ox-alpha": OX_ALPHA_EFFORT_LEVELS,
   "deepseek-v4-pro": EFFORT_LEVELS,
   "deepseek-v4-flash": ["high", "max"],
   "glm-5.2": ["high", "max"],

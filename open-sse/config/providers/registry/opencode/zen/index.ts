@@ -16,6 +16,12 @@ export const opencode_zenProvider: RegistryEntry = {
   passthroughModels: true,
   models: [
     // ── Chat / Coding ──────────────────────────────────────────
+    {
+      id: "x-preview-f-free",
+      name: "X Preview F Free",
+      supportsReasoning: true,
+      supportedThinkingEfforts: ["low", "high", "max"],
+    },
     // #2900: big-pickle's upstream runs DeepSeek thinking mode — declare the
     // interleaved reasoning_content contract so follow-up/tool-use turns replay
     // it (otherwise DeepSeek returns 400 "reasoning_content ... must be passed back").
