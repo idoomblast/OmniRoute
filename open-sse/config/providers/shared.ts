@@ -50,6 +50,8 @@ export interface RegistryModel {
   supportsReasoning?: boolean;
   supportsVision?: boolean;
   supportsXHighEffort?: boolean;
+  /** Explicit upstream reasoning-effort enum for strict models. */
+  supportedThinkingEfforts?: readonly string[];
   maxOutputTokens?: number;
   targetFormat?: string;
   strip?: readonly string[];

@@ -272,6 +272,15 @@ export function supportsXHighEffort(aliasOrId: string, modelId: string): boolean
   return true;
 }
 
+/** Return the explicit upstream reasoning-effort enum declared by the registry model. */
+export function getSupportedThinkingEfforts(
+  aliasOrId: string,
+  modelId: string
+): readonly string[] | undefined {
+  const { models: providerModels } = resolveProviderModelList(aliasOrId);
+  return providerModels?.find((entry) => entry.id === modelId)?.supportedThinkingEfforts;
+}
+
 /** @deprecated Use supportsXHighEffort(); max normalization now follows the same opt-out policy. */
 export function supportsXHighEffortForMaxNormalization(
   aliasOrId: string,

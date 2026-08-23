@@ -7,6 +7,7 @@ import {
   CANONICAL_EFFORT_VALUES,
   extendCodexGpt56EffortValues,
 } from "@/shared/reasoning/effortStandardization";
+import { getSupportedThinkingEfforts } from "@omniroute/open-sse/config/providerModels";
 
 export interface CustomModelEntry {
   id?: string;
@@ -87,12 +88,15 @@ export function getThinkingCapabilityFields(
 ): Record<string, boolean | string[]> {
   const supportsThinking = resolvedThinking;
   if (typeof supportsThinking !== "boolean") return {};
+  const registryEfforts = getSupportedThinkingEfforts(providerId, modelId);
   return {
     thinking: supportsThinking,
     supportsThinking,
     ...(supportsThinking
       ? {
-          effort_tiers: extendCodexGpt56EffortValues(providerId, modelId, CANONICAL_EFFORT_VALUES),
+          effort_tiers: registryEfforts
+            ? [...registryEfforts]
+            : extendCodexGpt56EffortValues(providerId, modelId, CANONICAL_EFFORT_VALUES),
         }
       : {}),
   };
