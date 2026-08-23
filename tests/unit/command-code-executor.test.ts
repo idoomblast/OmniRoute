@@ -79,7 +79,7 @@ test("Command Code provider catalog has pinned models and alias lookup", () => {
   assert.equal(entry.chatPath, "/alpha/generate");
   assert.deepEqual(
     entry.models.map((model) => model.id),
-    PINNED_COMMAND_CODE_MODELS
+    ["x-preview-f-free", ...PINNED_COMMAND_CODE_MODELS]
   );
   assert.equal(getRegistryEntry("cmd"), entry);
 });

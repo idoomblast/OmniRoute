@@ -271,14 +271,31 @@ const COMMAND_CODE_PASSTHROUGH_FIELDS = [
   "extra_body",
 ] as const;
 
+const STRICT_COMMAND_CODE_EFFORTS = ["low", "high", "max"] as const;
+
+function splitCommandCodeEffortSuffix(model: string): { baseModel: string; effort: string } | null {
+  for (const effort of STRICT_COMMAND_CODE_EFFORTS) {
+    const suffix = `-${effort}`;
+    if (model.endsWith(suffix) && model.length > suffix.length) {
+      return { baseModel: model.slice(0, -suffix.length), effort };
+    }
+  }
+  return null;
+}
+
 function buildCommandCodeBody(model: string, body: unknown, stream = false): JsonRecord {
   const input = isRecord(body) ? body : {};
 
   // Payload rules may rewrite `body.model` (e.g. deepseek-v4-pro-max →
   // deepseek/deepseek-v4-pro for the command-code provider). Prefer the
   // rewritten value if present; fall back to the resolved combo model arg.
-  const resolvedModel =
+  const requestedModel =
     typeof input.model === "string" && input.model.trim().length > 0 ? input.model : model;
+  const parsedEffort =
+    requestedModel === "x-preview-f-free" || requestedModel.startsWith("x-preview-f-free-")
+      ? splitCommandCodeEffortSuffix(requestedModel)
+      : null;
+  const resolvedModel = parsedEffort?.baseModel || requestedModel;
 
   const converted = convertMessages(input.messages, resolvedModel);
   const explicitSystem = typeof input.system === "string" ? input.system : "";
@@ -291,6 +308,10 @@ function buildCommandCodeBody(model: string, body: unknown, stream = false): Jso
     system,
     stream: true,
   };
+
+  if (parsedEffort && input.reasoning_effort === undefined) {
+    params.reasoning_effort = parsedEffort.effort;
+  }
 
   // Only forward max_tokens when the client actually supplied one. Omitting it
   // lets Command Code's upstream apply the model's own native default, so we
