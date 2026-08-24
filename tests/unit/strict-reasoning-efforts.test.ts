@@ -10,6 +10,7 @@ const { getThinkingCapabilityFields } =
 
 const STRICT_MODELS = [
   ["opencode", "ox-alpha"],
+  ["opencode-go", "ox-alpha-free"],
   ["opencode", "x-preview-f-free"],
   ["opencode-zen", "x-preview-f-free"],
   ["command-code", "x-preview-f-free"],
@@ -76,6 +77,11 @@ test("OpenCode ox-alpha does not expose unsupported effort aliases", () => {
 
 test("strict models expose only their upstream effort tiers in catalog capabilities", () => {
   assert.deepEqual(getThinkingCapabilityFields("opencode", "ox-alpha", true).effort_tiers, [
+    "low",
+    "high",
+    "max",
+  ]);
+  assert.deepEqual(getThinkingCapabilityFields("opencode-go", "ox-alpha-free", true).effort_tiers, [
     "low",
     "high",
     "max",

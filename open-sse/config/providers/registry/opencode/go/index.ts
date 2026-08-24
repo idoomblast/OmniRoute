@@ -13,6 +13,12 @@ export const opencode_goProvider: RegistryEntry = {
   authPrefix: "Bearer",
   defaultContextLength: 200000,
   models: [
+    {
+      id: "ox-alpha-free",
+      name: "OX Alpha Free",
+      supportsReasoning: true,
+      supportedThinkingEfforts: ["low", "high", "max"],
+    },
     // Port from decolua/9router 8efacc11: align with official Go endpoints —
     // glm-5.2 is now advertised and Kimi chat traffic must route through
     // `kimi-k2.7-code` (the live API rejects the plain `kimi-k2.7` alias for
