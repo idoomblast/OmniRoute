@@ -20,6 +20,7 @@ export const opencode_zenProvider: RegistryEntry = {
       id: "x-preview-f-free",
       name: "X Preview F Free",
       supportsReasoning: true,
+      supportsVision: true,
       supportedThinkingEfforts: ["low", "high", "max"],
     },
     // #2900: big-pickle's upstream runs DeepSeek thinking mode — declare the

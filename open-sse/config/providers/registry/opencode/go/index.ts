@@ -17,6 +17,7 @@ export const opencode_goProvider: RegistryEntry = {
       id: "ox-alpha-free",
       name: "OX Alpha Free",
       supportsReasoning: true,
+      supportsVision: true,
       supportedThinkingEfforts: ["low", "high", "max"],
     },
     // Port from decolua/9router 8efacc11: align with official Go endpoints —

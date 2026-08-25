@@ -17,12 +17,14 @@ export const opencodeProvider: RegistryEntry = {
       id: "ox-alpha",
       name: "OX Alpha",
       supportsReasoning: true,
+      supportsVision: true,
       supportedThinkingEfforts: ["low", "high", "max"],
     },
     {
       id: "x-preview-f-free",
       name: "X Preview F Free",
       supportsReasoning: true,
+      supportsVision: true,
       supportedThinkingEfforts: ["low", "high", "max"],
     },
     // #2900: big-pickle's upstream runs DeepSeek thinking mode — declare the

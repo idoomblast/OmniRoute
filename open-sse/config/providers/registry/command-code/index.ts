@@ -17,6 +17,7 @@ export const command_codeProvider: RegistryEntry = {
       id: "x-preview-f-free",
       name: "X Preview F Free (CC)",
       supportsReasoning: true,
+      supportsVision: true,
       supportedThinkingEfforts: ["low", "high", "max"],
     },
     {
