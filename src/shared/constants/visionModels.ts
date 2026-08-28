@@ -29,6 +29,7 @@ export const VISION_MODEL_ID_FRAGMENTS = [
   "qwen2-vl",
   "qwen2.5-vl",
   "qwen3-vl",
+  "qwen3.8",
   "qvq",
   "internvl",
   "minicpm-v",
