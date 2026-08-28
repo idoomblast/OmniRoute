@@ -30,6 +30,50 @@ test("qwen3.8 family resolves vision capability for passthrough providers (bai)"
   }
 });
 
+test("GLM-5.3-Flash / GLM-5V family resolves vision capability for passthrough providers (bai)", () => {
+  // Z.ai native multimodal GLM-5 models (verified against docs.z.ai):
+  //   - GLM-5.3-Flash: "first native multimodal model in the GLM-5 series"
+  //   - GLM-5V-Turbo:  input modalities Video/Image/Text/File
+  // These must resolve true via VISION_MODEL_ID_FRAGMENTS ("glm-5.3-flash", "glm-5v").
+  for (const modelId of [
+    "bai/glm-5.3-flash",
+    "glm-5.3-flash",
+    "bai/glm-5v-turbo",
+    "glm-5v-turbo",
+    "bai/glm-5v",
+  ]) {
+    const capabilities = getResolvedModelCapabilities(modelId);
+    assert.equal(
+      capabilities.supportsVision,
+      true,
+      `${modelId} supports vision (native multimodal GLM-5, image request must route)`
+    );
+  }
+});
+
+test("GLM-5.1 / GLM-5.2 / GLM-5.3 (base) are TEXT-ONLY — must NOT be flagged vision", () => {
+  // Z.ai docs + community verification: GLM-5.1, GLM-5.2, and GLM-5.3 (base) are
+  // text-in/text-out only ("input modalities: Text"). Flagging them vision would
+  // re-create #4071 (image routed to a model that cannot see it). Fragments are
+  // "glm-5.3-flash" and "glm-5v" — never a bare "glm-5.1/5.2/5.3" prefix.
+  for (const modelId of [
+    "bai/glm-5.1",
+    "glm-5.1",
+    "bai/glm-5.2",
+    "glm-5.2",
+    "bai/glm-5.3",
+    "glm-5.3",
+    "opencode-go/glm-5.1",
+    "opencode-zen/glm-5.2",
+  ]) {
+    assert.equal(
+      isVisionModelId(modelId),
+      false,
+      `${modelId} must NOT be flagged vision — GLM-5.1/5.2/5.3 base are text-only`
+    );
+  }
+});
+
 test("qwen3.8 fragment does not leak into older text-only qwen3.5/3.6/3.7 (regression #2822)", () => {
   // #2822: qwen3.5-plus / qwen3.6-plus / qwen3.7-max on opencode-go / opencode-zen
   // are TEXT-ONLY and must NOT be flagged vision by the fragment heuristic.
