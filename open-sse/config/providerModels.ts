@@ -1,4 +1,5 @@
 import { generateModels, generateAliasMap, type RegistryModel } from "./providerRegistry.ts";
+import { getModelSpec } from "@/shared/constants/modelSpecs.ts";
 
 // Lazy PROVIDER_MODELS: deferred until first property access to speed up startup.
 // The Proxy defers `generateModels()` from module-evaluation time to the first read.
@@ -12,27 +13,27 @@ export const PROVIDER_MODELS: Record<string, RegistryModel[]> = new Proxy(
   {} as Record<string, RegistryModel[]>,
   {
     get(_, prop) {
-      if (typeof prop === 'symbol') return undefined;
+      if (typeof prop === "symbol") return undefined;
       return Reflect.get(initModels(), prop, _models);
     },
     has(_, prop) {
-      if (typeof prop === 'symbol') return false;
+      if (typeof prop === "symbol") return false;
       return Reflect.has(initModels(), prop);
     },
     ownKeys() {
       return Reflect.ownKeys(initModels());
     },
     getOwnPropertyDescriptor(_, prop) {
-      if (typeof prop === 'symbol') return undefined;
+      if (typeof prop === "symbol") return undefined;
       return Object.getOwnPropertyDescriptor(initModels(), prop);
     },
     set(_, prop, value) {
-      if (typeof prop === 'symbol') return false;
+      if (typeof prop === "symbol") return false;
       (initModels() as Record<string, RegistryModel[]>)[prop] = value;
       return true;
     },
     deleteProperty(_, prop) {
-      if (typeof prop === 'symbol') return false;
+      if (typeof prop === "symbol") return false;
       return Reflect.deleteProperty(initModels(), prop);
     },
   }
@@ -41,27 +42,27 @@ export const PROVIDER_ID_TO_ALIAS: Record<string, string> = new Proxy(
   {} as Record<string, string>,
   {
     get(_, prop) {
-      if (typeof prop === 'symbol') return undefined;
+      if (typeof prop === "symbol") return undefined;
       return Reflect.get(initAliases(), prop, _aliases);
     },
     has(_, prop) {
-      if (typeof prop === 'symbol') return false;
+      if (typeof prop === "symbol") return false;
       return Reflect.has(initAliases(), prop);
     },
     ownKeys() {
       return Reflect.ownKeys(initAliases());
     },
     getOwnPropertyDescriptor(_, prop) {
-      if (typeof prop === 'symbol') return undefined;
+      if (typeof prop === "symbol") return undefined;
       return Object.getOwnPropertyDescriptor(initAliases(), prop);
     },
     set(_, prop, value) {
-      if (typeof prop === 'symbol') return false;
+      if (typeof prop === "symbol") return false;
       (initAliases() as Record<string, string>)[prop] = value;
       return true;
     },
     deleteProperty(_, prop) {
-      if (typeof prop === 'symbol') return false;
+      if (typeof prop === "symbol") return false;
       return Reflect.deleteProperty(initAliases(), prop);
     },
   }
@@ -272,13 +273,27 @@ export function supportsXHighEffort(aliasOrId: string, modelId: string): boolean
   return true;
 }
 
-/** Return the explicit upstream reasoning-effort enum declared by the registry model. */
+/**
+ * Return the explicit upstream reasoning-effort enum for a model.
+ *
+ * Resolution order:
+ *   1. The provider registry entry (`RegistryModel.supportedThinkingEfforts`) —
+ *      provider-scoped, wins when present.
+ *   2. The global `MODEL_SPECS` entry (`ModelSpec.supportedThinkingEfforts`) —
+ *      fleet-wide fallback so strict models (e.g. GLM-5.3-Flash low|high|max)
+ *      get the correct enum even on passthrough providers with no curated
+ *      registry entry.
+ */
 export function getSupportedThinkingEfforts(
   aliasOrId: string,
   modelId: string
 ): readonly string[] | undefined {
   const { models: providerModels } = resolveProviderModelList(aliasOrId);
-  return providerModels?.find((entry) => entry.id === modelId)?.supportedThinkingEfforts;
+  const registryEfforts = providerModels?.find(
+    (entry) => entry.id === modelId
+  )?.supportedThinkingEfforts;
+  if (registryEfforts && registryEfforts.length > 0) return registryEfforts;
+  return getModelSpec(modelId)?.supportedThinkingEfforts;
 }
 
 /** @deprecated Use supportsXHighEffort(); max normalization now follows the same opt-out policy. */

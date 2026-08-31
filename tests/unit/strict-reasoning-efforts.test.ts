@@ -14,6 +14,12 @@ const STRICT_MODELS = [
   ["opencode", "x-preview-f-free"],
   ["opencode-zen", "x-preview-f-free"],
   ["command-code", "x-preview-f-free"],
+  // GLM-5.3-Flash strict tiers resolve via the GLOBAL MODEL_SPECS fallback —
+  // none of these providers has a registry entry for the model (bai, zai and
+  // glm catalogs do not list glm-5.3-flash), proving the fleet-wide path works.
+  ["bai", "glm-5.3-flash"],
+  ["zai", "glm-5.3-flash"],
+  ["glm", "glm-5.3-flash"],
 ] as const;
 
 for (const [provider, model] of STRICT_MODELS) {

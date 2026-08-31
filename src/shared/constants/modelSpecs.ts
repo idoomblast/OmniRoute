@@ -43,6 +43,15 @@ export interface ModelSpec {
   // burns ~277 reasoning tokens on a plain request; `reasoning_effort:"none"` → 0)
   // without patching every client. See open-sse/services/defaultReasoningEffort.ts.
   defaultReasoningEffort?: "none" | "low" | "medium" | "high";
+  // Global upstream reasoning-effort enum for strict models, keyed by model id. When a
+  // model accepts ONLY a fixed set of reasoning_effort values (e.g. GLM-5.3-Flash:
+  // low|high|max, rejecting xhigh and any "disable thinking" attempt), declaring it here
+  // makes it apply to EVERY provider that resolves the model id — a passthrough provider
+  // with no curated registry entry still honors the upstream contract, and the sanitizer
+  // preserves `max` verbatim instead of normalizing it to xhigh. Registry entries
+  // (`RegistryModel.supportedThinkingEfforts`) win when both exist. See
+  // open-sse/config/providerModels.ts::getSupportedThinkingEfforts.
+  supportedThinkingEfforts?: readonly string[];
 }
 
 const BEDROCK_CLAUDE_ALIASES = (...modelIds: string[]) => [
@@ -547,6 +556,24 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
     thinkingBudgetCap: 38912,
     supportsThinking: true,
     supportsTools: true,
+  },
+
+  // ── Z.AI GLM-5.3-Flash (native multimodal, strict effort tiers) ──
+  // First native multimodal model in the GLM-5 series (vision handled via
+  // VISION_MODEL_ID_FRAGMENTS "glm-5.3-flash"). Always runs in thinking mode
+  // upstream and only accepts reasoning_effort {low, high, max} — it REJECTS
+  // xhigh and any "disable thinking" attempt (HTTP 400). Declared globally so
+  // every provider resolving this model id (bai, z.ai, …) inherits the strict
+  // enum without a per-provider registry entry (sanitizer preserves `max`
+  // verbatim instead of normalizing it to xhigh).
+  "glm-5.3-flash": {
+    maxOutputTokens: 131072,
+    contextWindow: 1000000,
+    thinkingBudgetCap: 38912,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    supportedThinkingEfforts: ["low", "high", "max"],
   },
 
   // ── MiniMax M3 (1M context, 512K max output) ─────────────────────
