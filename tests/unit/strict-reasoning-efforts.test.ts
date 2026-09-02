@@ -20,6 +20,13 @@ const STRICT_MODELS = [
   ["bai", "glm-5.3-flash"],
   ["zai", "glm-5.3-flash"],
   ["glm", "glm-5.3-flash"],
+  // DeepSeek V4 family (low|high|max) resolves via the same GLOBAL MODEL_SPECS
+  // fallback — bai has no curated registry entry, proving fleet-wide coverage.
+  // The -vision-exp / -free variants are matched by model-id prefix.
+  ["bai", "deepseek-v4-flash"],
+  ["bai", "deepseek-v4-flash-vision-exp"],
+  ["bai", "deepseek-v4-pro"],
+  ["deepseek", "deepseek-v4-flash"],
 ] as const;
 
 for (const [provider, model] of STRICT_MODELS) {

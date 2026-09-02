@@ -607,6 +607,12 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
   },
 
   // ── DeepSeek V4 (1M context, 384K max output) ────────────────────
+  // The DeepSeek V4 family thinks up to `max` (its top reasoning tier is
+  // literally "max", not "xhigh"). Declared globally (same pattern as
+  // GLM-5.3-Flash above) so EVERY provider resolving a deepseek-v4* id —
+  // bai, deepseek, opencode-go, the -vision-exp/-free variants (matched by
+  // prefix in getCanonicalModelSpecId) — inherits the strict enum and the
+  // sanitizer preserves `max` verbatim instead of normalizing it to xhigh.
   "deepseek-v4-pro": {
     maxOutputTokens: 384000,
     contextWindow: 1000000,
@@ -616,6 +622,7 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
     thinkingBudgetCap: 380000,
     supportsThinking: true,
     supportsTools: true,
+    supportedThinkingEfforts: ["low", "high", "max"],
   },
   "deepseek-v4-flash": {
     maxOutputTokens: 384000,
@@ -623,6 +630,7 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
     thinkingBudgetCap: 380000,
     supportsThinking: true,
     supportsTools: true,
+    supportedThinkingEfforts: ["low", "high", "max"],
   },
 
   // ── Tencent Hunyuan 3 Preview ────────────────────────────────────
