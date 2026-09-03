@@ -566,6 +566,14 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
   // every provider resolving this model id (bai, z.ai, …) inherits the strict
   // enum without a per-provider registry entry (sanitizer preserves `max`
   // verbatim instead of normalizing it to xhigh).
+  "glm-5.3": {
+    maxOutputTokens: 131072,
+    contextWindow: 1000000,
+    thinkingBudgetCap: 38912,
+    supportsThinking: true,
+    supportsTools: true,
+    supportedThinkingEfforts: ["low", "high", "max"],
+  },
   "glm-5.3-flash": {
     maxOutputTokens: 131072,
     contextWindow: 1000000,
@@ -663,10 +671,21 @@ export function getCanonicalModelSpecId(modelId: string): string | null {
     if (spec.aliases?.some((alias) => alias.toLowerCase() === lower)) return canonical;
   }
 
-  // Prefix matching (case-insensitive)
+  // Prefix matching (case-insensitive): pick the MOST SPECIFIC (longest) key
+  // that is a prefix — insertion order must not matter. E.g. "glm-5.3-flash-vision"
+  // must resolve to "glm-5.3-flash" (len 12), not "glm-5" (len 5). Short generic
+  // keys ("glm-5") must never shadow longer family specs ("glm-5.3-flash", "glm-5.3").
+  let bestPrefixKey: string | null = null;
+  let bestPrefixLen = -1;
   for (const key of Object.keys(MODEL_SPECS)) {
-    if (key !== "__default__" && lower.startsWith(key.toLowerCase())) return key;
+    if (key === "__default__") continue;
+    const k = key.toLowerCase();
+    if (lower.startsWith(k) && k.length > bestPrefixLen) {
+      bestPrefixKey = key;
+      bestPrefixLen = k.length;
+    }
   }
+  if (bestPrefixKey) return bestPrefixKey;
 
   return null;
 }

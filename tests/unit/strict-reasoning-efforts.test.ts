@@ -14,12 +14,17 @@ const STRICT_MODELS = [
   ["opencode", "x-preview-f-free"],
   ["opencode-zen", "x-preview-f-free"],
   ["command-code", "x-preview-f-free"],
-  // GLM-5.3-Flash strict tiers resolve via the GLOBAL MODEL_SPECS fallback —
-  // none of these providers has a registry entry for the model (bai, zai and
-  // glm catalogs do not list glm-5.3-flash), proving the fleet-wide path works.
+  // GLM-5.3 family strict tiers resolve via the GLOBAL MODEL_SPECS fallback —
+  // none of these providers has a registry entry for the models (bai, zai and
+  // glm catalogs do not list them), proving the fleet-wide path works.
+  // Bare "glm-5.3" and "-vision" variants (prefix-resolved) are covered too.
+  ["bai", "glm-5.3"],
+  ["zai", "glm-5.3"],
+  ["glm", "glm-5.3"],
   ["bai", "glm-5.3-flash"],
   ["zai", "glm-5.3-flash"],
   ["glm", "glm-5.3-flash"],
+  ["bai", "glm-5.3-flash-vision"],
   // DeepSeek V4 family (low|high|max) resolves via the same GLOBAL MODEL_SPECS
   // fallback — bai has no curated registry entry, proving fleet-wide coverage.
   // The -vision-exp / -free variants are matched by model-id prefix.
