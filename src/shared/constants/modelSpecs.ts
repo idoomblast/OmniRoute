@@ -519,13 +519,21 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
     supportsTools: true,
   },
 
-  // ── Z.AI GLM-5.2 (1M context, 128K max output, effort tiers) ────
+  // ── Z.AI GLM-5.2 (1M context, 128K max output, strict effort tiers) ──
+  // Same strict low|high|max enum as the GLM-5.3 family: Zhipu's top reasoning
+  // tier is literally "max", not "xhigh" (ollama-cloud GLM 5.2 accepts
+  // low|medium|high|max|none and rejects xhigh — see reasoningEffort.ts
+  // supportsMaxEffortForProvider). Declared globally so EVERY provider
+  // resolving a glm-5.2* id (zai, glm, qwen-cloud, decart/zai-org passthrough,
+  // …) inherits the strict enum and the sanitizer preserves `max` verbatim
+  // instead of normalizing it to xhigh.
   "glm-5.2": {
     maxOutputTokens: 131072,
     contextWindow: 1000000,
     thinkingBudgetCap: 38912,
     supportsThinking: true,
     supportsTools: true,
+    supportedThinkingEfforts: ["low", "high", "max"],
   },
   "glm-5.2-high": {
     maxOutputTokens: 131072,
@@ -533,6 +541,7 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
     thinkingBudgetCap: 38912,
     supportsThinking: true,
     supportsTools: true,
+    supportedThinkingEfforts: ["low", "high", "max"],
   },
   "glm-5.2-max": {
     maxOutputTokens: 131072,
@@ -540,6 +549,7 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
     thinkingBudgetCap: 38912,
     supportsThinking: true,
     supportsTools: true,
+    supportedThinkingEfforts: ["low", "high", "max"],
   },
 
   // ── Z.AI GLM-5.x (200K context, 128K max output) ─────────────────
