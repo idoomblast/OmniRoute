@@ -350,6 +350,34 @@ export class OpencodeExecutor extends BaseExecutor {
         mb.tools = mb.tools.slice(0, MAX_TOOLS_LIMIT);
       }
     }
+    // Console Go (opencode.ai/zen/go) runs a strict schema on /chat/completions
+    // and rejects the Responses-API-shaped `reasoning: { enabled, effort }`
+    // object with 400 "Extra inputs are not permitted, field: 'reasoning'" —
+    // the transport only accepts the flat `reasoning_effort` string (proved
+    // by the glm-5.2-high/-max variant aliases, which inject that flat field).
+    // Fold a present `reasoning.effort` into `reasoning_effort` (explicit string
+    // always wins), then strip the object from the wire body. Runs BEFORE the
+    // variant-suffix injection so a client-supplied effort wins over the model
+    // alias suffix. An object without `effort` is dropped as well: `enabled`
+    // alone has no flat equivalent and the upstream rejects the whole field,
+    // so keeping it would 400 the request. Scoped to the Go tier only — the
+    // 400 evidence is go-specific; zen has no such incident on record.
+    if (
+      this.provider === "opencode-go" &&
+      modifiedBody &&
+      typeof modifiedBody === "object" &&
+      !Array.isArray(modifiedBody)
+    ) {
+      const mb = modifiedBody as Record<string, unknown>;
+      const reasoning = mb.reasoning;
+      if (reasoning !== null && typeof reasoning === "object" && !Array.isArray(reasoning)) {
+        const effort = (reasoning as Record<string, unknown>).effort;
+        if (mb.reasoning_effort === undefined && typeof effort === "string" && effort.length > 0) {
+          mb.reasoning_effort = effort;
+        }
+        delete mb.reasoning;
+      }
+    }
     if (modifiedBody && typeof modifiedBody === "object" && !Array.isArray(modifiedBody)) {
       const mb = modifiedBody as Record<string, unknown>;
       const parsed = parseEffortLevel(model);

@@ -599,6 +599,87 @@ describe("OpencodeExecutor", () => {
       assert.equal(out.reasoning_effort, undefined);
     });
   });
+
+  describe("reasoning object field fold (Console Go 400 fix)", () => {
+    // Live incident (log 1788546878771, combo glm-5.2 failover): the OpenCode
+    // Go upstream ("Console Go") rejects the Responses-API-shaped
+    // `reasoning: { enabled, effort }` object with
+    // "Extra inputs are not permitted, field: 'reasoning'" — the transport
+    // only accepts the flat `reasoning_effort` string. Fold the object into
+    // the flat field and strip it from the wire body.
+    function baseBody(model: string) {
+      return {
+        model,
+        stream: false,
+        messages: [{ role: "user", content: "ok" }],
+        max_tokens: 16,
+      };
+    }
+
+    it("folds reasoning.effort into reasoning_effort and strips the object", () => {
+      const body = baseBody("glm-5.2") as Record<string, unknown>;
+      body.reasoning = { enabled: true, effort: "max" };
+      const out = goExecutor.transformRequest("glm-5.2", body, false, {
+        apiKey: "test-key",
+      });
+      assert.equal(out.reasoning_effort, "max");
+      assert.equal(out.reasoning, undefined);
+    });
+
+    it("never overwrites an explicit reasoning_effort string", () => {
+      const body = baseBody("glm-5.2") as Record<string, unknown>;
+      body.reasoning_effort = "high";
+      body.reasoning = { enabled: true, effort: "max" };
+      const out = goExecutor.transformRequest("glm-5.2", body, false, {
+        apiKey: "test-key",
+      });
+      assert.equal(out.reasoning_effort, "high");
+      assert.equal(out.reasoning, undefined);
+    });
+
+    it("strips a reasoning object without effort (no effort fabricated)", () => {
+      const body = baseBody("glm-5.2") as Record<string, unknown>;
+      body.reasoning = { enabled: true };
+      const out = goExecutor.transformRequest("glm-5.2", body, false, {
+        apiKey: "test-key",
+      });
+      // The upstream rejects the `reasoning` field in ANY shape, so the object
+      // must go; but with no effort inside, nothing may be fabricated.
+      assert.equal(out.reasoning_effort, undefined);
+      assert.equal(out.reasoning, undefined);
+    });
+
+    it("applies the fold on the effort-variant path too (client effort wins over suffix)", () => {
+      const body = baseBody("glm-5.2-high") as Record<string, unknown>;
+      body.reasoning = { enabled: true, effort: "max" };
+      const out = goExecutor.transformRequest("glm-5.2-high", body, false, {
+        apiKey: "test-key",
+      });
+      assert.equal(out.model, "glm-5.2");
+      assert.equal(out.reasoning_effort, "max");
+      assert.equal(out.reasoning, undefined);
+    });
+
+    it("strips the reasoning object even when it carries only enabled:false", () => {
+      const body = baseBody("glm-5.2") as Record<string, unknown>;
+      body.reasoning = { enabled: false };
+      const out = goExecutor.transformRequest("glm-5.2", body, false, {
+        apiKey: "test-key",
+      });
+      assert.equal(out.reasoning, undefined);
+      assert.equal(out.reasoning_effort, undefined);
+      // enabled:false → no reasoning at all; the fold must not invent effort
+    });
+
+    it("leaves bodies without a reasoning object untouched", () => {
+      const body = baseBody("glm-5.2") as Record<string, unknown>;
+      const out = goExecutor.transformRequest("glm-5.2", body, false, {
+        apiKey: "test-key",
+      });
+      assert.equal(out.reasoning, undefined);
+      assert.equal(out.reasoning_effort, undefined);
+    });
+  });
 });
 
 describe("DefaultExecutor", () => {
