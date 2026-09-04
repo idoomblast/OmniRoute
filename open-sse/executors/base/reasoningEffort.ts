@@ -7,6 +7,7 @@ import {
   supportsClaudeMaxEffort,
   supportsXHighEffort,
 } from "../../config/providerModels.ts";
+import { getRegistryEntry } from "../../config/providerRegistry.ts";
 
 /**
  * Sanitize reasoning_effort for providers that don't accept all values.
@@ -269,6 +270,16 @@ export function sanitizeReasoningEffortForProvider(
   const c = readEffortCarriers(b);
   if (c.effort === undefined) {
     if (!isStrictReasoningModel(provider, modelStr)) return body;
+    // Providers with their own literal-max contract (opencode-go DeepSeek,
+    // ollama-cloud, moonshot kimi-k3, gpt-5.6) — a global strict enum must not
+    // force-inject `high` into their request shape; they already handle the
+    // no-effort case natively or via their executor.
+    if (supportsMaxEffortForProvider(provider, modelStr)) return body;
+    // Claude-format providers (zai, …) speak `thinking`/`output_config`, not
+    // `reasoning_effort` — injecting the OpenAI-shaped field into their
+    // Anthropic-format body would send an unknown key upstream. Their
+    // translators already map any explicit effort; no injection needed.
+    if (getRegistryEntry(provider)?.format === "claude") return body;
     log?.info?.(
       "REASONING_SANITIZE",
       `${provider}/${modelStr}: injected mandatory reasoning_effort high`
@@ -277,7 +288,36 @@ export function sanitizeReasoningEffortForProvider(
   }
   const effortStr = typeof c.effort === "string" ? c.effort.toLowerCase() : "";
 
+  // Native DeepSeek (api.deepseek.com) — V4 thinking mode accepts reasoning_effort
+  // ONLY as {high, max} (its own top tier is literally "max"). OmniRoute's internal
+  // scale is low|medium|high|xhigh where xhigh is the top, so map onto DeepSeek's
+  // vocabulary: xhigh → max (top→top), low|medium → high (below the enum floor).
+  // high/max pass through unchanged. Without this, the claude→openai translator's
+  // xhigh (and max-normalized-to-xhigh below) reaches DeepSeek as an unknown value,
+  // silently dropping the client's requested effort. This is the INVERSE of the
+  // OpenRouter-DeepSeek path, whose normalized API expects xhigh, not max (pi#4055).
+  // Runs BEFORE the strict-tier branch: provider-deepseek has a MORE specific
+  // contract than the global MODEL_SPECS enum, and must not be shadowed by it.
+  if (provider === "deepseek") {
+    const mapped =
+      effortStr === "xhigh" ? "max" : effortStr === "low" || effortStr === "medium" ? "high" : null;
+    if (mapped && mapped !== effortStr) {
+      log?.info?.(
+        "REASONING_SANITIZE",
+        `deepseek/${modelStr}: normalized reasoning_effort ${effortStr} → ${mapped}`
+      );
+      return writeEffortValue(b, mapped, c);
+    }
+    return body;
+  }
+
   if (isStrictReasoningModel(provider, modelStr)) {
+    // Providers with their own literal-max contract for this model (opencode-go
+    // DeepSeek variants, ollama-cloud, moonshot kimi-k3, gpt-5.6) accept the full
+    // low|medium|high|max vocabulary natively — the global strict enum (low|high|
+    // max) must not clamp their `medium` down to `high`. Their supportsMax opt-in
+    // is the more specific contract and wins over MODEL_SPECS.
+    if (supportsMaxEffortForProvider(provider, modelStr)) return body;
     const mappedEffort =
       effortStr === "medium" ? "high" : effortStr === "xhigh" ? "max" : effortStr;
     if (["low", "high", "max"].includes(mappedEffort)) {
@@ -301,27 +341,6 @@ export function sanitizeReasoningEffortForProvider(
       `${provider}/${modelStr}: removed unsupported reasoning_effort`
     );
     return stripEffortValue(b, c);
-  }
-
-  // Native DeepSeek (api.deepseek.com) — V4 thinking mode accepts reasoning_effort
-  // ONLY as {high, max} (its own top tier is literally "max"). OmniRoute's internal
-  // scale is low|medium|high|xhigh where xhigh is the top, so map onto DeepSeek's
-  // vocabulary: xhigh → max (top→top), low|medium → high (below the enum floor).
-  // high/max pass through unchanged. Without this, the claude→openai translator's
-  // xhigh (and max-normalized-to-xhigh below) reaches DeepSeek as an unknown value,
-  // silently dropping the client's requested effort. This is the INVERSE of the
-  // OpenRouter-DeepSeek path, whose normalized API expects xhigh, not max (pi#4055).
-  if (provider === "deepseek") {
-    const mapped =
-      effortStr === "xhigh" ? "max" : effortStr === "low" || effortStr === "medium" ? "high" : null;
-    if (mapped && mapped !== effortStr) {
-      log?.info?.(
-        "REASONING_SANITIZE",
-        `deepseek/${modelStr}: normalized reasoning_effort ${effortStr} → ${mapped}`
-      );
-      return writeEffortValue(b, mapped, c);
-    }
-    return body;
   }
 
   const supportsXHigh = supportsXHighEffort(provider, modelStr);
