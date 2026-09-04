@@ -1,5 +1,6 @@
 import { generateModels, generateAliasMap, type RegistryModel } from "./providerRegistry.ts";
 import { getModelSpec } from "@/shared/constants/modelSpecs.ts";
+import { AGGREGATOR_PROVIDER_IDS } from "@/shared/constants/providers.ts";
 
 // Lazy PROVIDER_MODELS: deferred until first property access to speed up startup.
 // The Proxy defers `generateModels()` from module-evaluation time to the first read.
@@ -283,6 +284,17 @@ export function supportsXHighEffort(aliasOrId: string, modelId: string): boolean
  *      fleet-wide fallback so strict models (e.g. GLM-5.3-Flash low|high|max)
  *      get the correct enum even on passthrough providers with no curated
  *      registry entry.
+ *
+ * For aggregator-namespace ids ("z-ai/glm-5.3:openrouter", "zai-org/glm-5.2:preview")
+ * the global lookup retries with the namespace segment (everything up to and
+ * including the last "/") stripped — spec keys never contain "/", so a match
+ * that only succeeds after the strip proves the namespace was the sole blocker.
+ * This is deliberately NOT wired into getModelSpec() itself: an aggregator that
+ * re-hosts a model under its own namespace has its OWN contract for that model
+ * (e.g. OpenRouter-DeepSeek expects xhigh, not max — pi#4055), and only the
+ * reasoning-effort enum is safe to inherit from the base model. The retry is
+ * also skipped when the provider curates the model in its registry — a listed
+ * entry means the operator already expressed the provider's contract.
  */
 export function getSupportedThinkingEfforts(
   aliasOrId: string,
@@ -293,7 +305,20 @@ export function getSupportedThinkingEfforts(
     (entry) => entry.id === modelId
   )?.supportedThinkingEfforts;
   if (registryEfforts && registryEfforts.length > 0) return registryEfforts;
-  return getModelSpec(modelId)?.supportedThinkingEfforts;
+  const specEfforts = getModelSpec(modelId)?.supportedThinkingEfforts;
+  if (specEfforts && specEfforts.length > 0) return specEfforts;
+
+  // Aggregator-namespace retry (custom providers with no curated registry).
+  // Skipped for aggregator providers (openrouter, …) which re-host models under
+  // their own namespace with their own effort vocabulary (OpenRouter-DeepSeek
+  // expects xhigh, not max — pi#4055), and when the provider curates the
+  // stripped id (the operator already expressed this provider's contract).
+  const slashIndex = modelId.lastIndexOf("/");
+  if (slashIndex < 0) return undefined;
+  if (AGGREGATOR_PROVIDER_IDS.has(aliasOrId)) return undefined;
+  const strippedModelId = modelId.slice(slashIndex + 1);
+  if (providerModels?.some((entry) => entry.id === strippedModelId)) return undefined;
+  return getModelSpec(strippedModelId)?.supportedThinkingEfforts;
 }
 
 /** @deprecated Use supportsXHighEffort(); max normalization now follows the same opt-out policy. */
