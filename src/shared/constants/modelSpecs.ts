@@ -651,6 +651,30 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
     supportedThinkingEfforts: ["low", "high", "max"],
   },
 
+  // ── DeepSeek V4.1-Flash (native multimodal, 2026-09-10) ──────────
+  // First DeepSeek Flash with native visual understanding (JPEG/PNG/GIF/WebP,
+  // api-docs.deepseek.com/guides/vision). The official API model string is
+  // `deepseek-flash`; the V4 family ids (deepseek-v4-flash,
+  // deepseek-v4-flash-vision-exp) are retired and temporarily route here.
+  // Thinking is enabled by default with effort {low, high, max} (thinking_mode
+  // guide); 1M context / 384K max output, same envelope as the V4 family.
+  // Declared globally so EVERY provider resolving a deepseek-v4.1-flash* id —
+  // native deepseek, bai, custom:*, aggregator namespaces matched by the
+  // `deepseek-v4.1-flash` VISION_MODEL_ID_FRAGMENTS heuristic — inherits the
+  // vision flag and the strict enum (sanitizer preserves `max` verbatim).
+  "deepseek-v4.1-flash": {
+    maxOutputTokens: 384000,
+    contextWindow: 1000000,
+    // Reserve 4K for visible response: thinking + response must both fit
+    // under maxOutputTokens (same rationale as the V4 family above).
+    thinkingBudgetCap: 380000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    supportedThinkingEfforts: ["low", "high", "max"],
+    aliases: ["deepseek-flash", "deepseek-v4.1-flash-expires-on-0910"],
+  },
+
   // ── Tencent Hunyuan 3 Preview ────────────────────────────────────
   "hy3-preview": {
     maxOutputTokens: 262144,

@@ -540,15 +540,19 @@ test("sanitizeReasoningEffortForProvider: native deepseek preserves max", () => 
   assert.equal(log.messages.length, 0);
 });
 
-test("sanitizeReasoningEffortForProvider: native deepseek clamps low → high", () => {
+test("sanitizeReasoningEffortForProvider: native deepseek preserves low (V4 GA relaxed the floor)", () => {
+  // The {high, max}-only contract (#4219) was relaxed at the V4 GA on
+  // 2026-08-13: reasoning_effort {low, high, max} is now the documented enum
+  // (api-docs.deepseek.com/guides/thinking_mode). `low` must reach the wire
+  // verbatim instead of being clamped to high.
   const body = {
     model: "deepseek-v4-pro",
     reasoning_effort: "low",
     messages: [{ role: "user", content: "hi" }],
   };
   const result = sanitizeReasoningEffortForProvider(body, "deepseek", "deepseek-v4-pro", null);
-  assert.notEqual(result, body, "must return a new object when mutating");
-  assert.equal((result as any).reasoning_effort, "high", "below the {high, max} floor → high");
+  assert.equal(result, body, "low is a documented native tier — passes through unchanged");
+  assert.equal((result as any).reasoning_effort, "low");
 });
 
 test("sanitizeReasoningEffortForProvider: native deepseek clamps medium → high", () => {

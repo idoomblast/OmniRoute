@@ -41,6 +41,13 @@ export const VISION_MODEL_ID_FRAGMENTS = [
   "glm-4.6v",
   "glm-5.3-flash",
   "glm-5v",
+  // DeepSeek V4.1-Flash — first Flash with native visual understanding
+  // (api-docs.deepseek.com/guides/vision, 2026-09-10). Anchored to the full
+  // `deepseek-v4.1-flash` id, never a bare "deepseek" prefix: the V4 family
+  // (deepseek-v4-flash / -pro) is TEXT-ONLY and the retired
+  // deepseek-v4-flash-vision-exp carried vision only in its explicit -vision
+  // suffix (already covered by the "-vision" fragment above).
+  "deepseek-v4.1-flash",
   "gpt-4o",
   "gpt-4.1",
   "gpt-4-turbo",

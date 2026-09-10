@@ -288,19 +288,32 @@ export function sanitizeReasoningEffortForProvider(
   }
   const effortStr = typeof c.effort === "string" ? c.effort.toLowerCase() : "";
 
-  // Native DeepSeek (api.deepseek.com) — V4 thinking mode accepts reasoning_effort
-  // ONLY as {high, max} (its own top tier is literally "max"). OmniRoute's internal
-  // scale is low|medium|high|xhigh where xhigh is the top, so map onto DeepSeek's
-  // vocabulary: xhigh → max (top→top), low|medium → high (below the enum floor).
-  // high/max pass through unchanged. Without this, the claude→openai translator's
-  // xhigh (and max-normalized-to-xhigh below) reaches DeepSeek as an unknown value,
-  // silently dropping the client's requested effort. This is the INVERSE of the
-  // OpenRouter-DeepSeek path, whose normalized API expects xhigh, not max (pi#4055).
-  // Runs BEFORE the strict-tier branch: provider-deepseek has a MORE specific
-  // contract than the global MODEL_SPECS enum, and must not be shadowed by it.
+  // Native DeepSeek (api.deepseek.com) — V4.1-Flash / V4-Pro thinking mode accepts
+  // reasoning_effort as {low, high, max} (thinking_mode guide, 2026-09-10; the
+  // {high, max}-only contract was relaxed at the V4 GA on 2026-08-13). OmniRoute's
+  // internal scale is low|medium|high|xhigh where xhigh is the top, so map onto
+  // DeepSeek's vocabulary: xhigh → max (top→top), medium → high (below the enum
+  // floor). low/high/max pass through unchanged. Without this, the claude→openai
+  // translator's xhigh (and max-normalized-to-xhigh below) reaches DeepSeek as an
+  // unknown value, silently dropping the client's requested effort. This is the
+  // INVERSE of the OpenRouter-DeepSeek path, whose normalized API expects xhigh,
+  // not max (pi#4055). Runs BEFORE the strict-tier branch: provider-deepseek has a
+  // MORE specific contract than the global MODEL_SPECS enum, and must not be
+  // shadowed by it.
   if (provider === "deepseek") {
-    const mapped =
-      effortStr === "xhigh" ? "max" : effortStr === "low" || effortStr === "medium" ? "high" : null;
+    // Official alias table (thinking_mode guide): minimal→low, medium→high,
+    // xhigh→max, ultra→max. Anything else outside {low, high, max} — including
+    // `none` (Responses-format only; the Chat Completions way to disable
+    // thinking is `thinking:{"type":"disabled"}`) and garbage — maps onto the
+    // documented default effort `high` so the request cannot 400 on the wire.
+    const deepseekAliasMap: Record<string, string> = {
+      minimal: "low",
+      medium: "high",
+      xhigh: "max",
+      ultra: "max",
+    };
+    const isValid = effortStr === "low" || effortStr === "high" || effortStr === "max";
+    const mapped = isValid ? null : (deepseekAliasMap[effortStr] ?? "high");
     if (mapped && mapped !== effortStr) {
       log?.info?.(
         "REASONING_SANITIZE",

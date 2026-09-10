@@ -38,13 +38,20 @@ const STRICT_MODELS = [
   // DeepSeek V4 family (low|high|max) resolves via the same GLOBAL MODEL_SPECS
   // fallback — bai has no curated registry entry, proving fleet-wide coverage.
   // The -vision-exp / -free variants are matched by model-id prefix.
-  // NOTE: the NATIVE deepseek provider is intentionally NOT listed here — it has
-  // its own sanitizer branch (reasoningEffort.ts) with a stricter {high, max}
-  // contract that clamps low|medium → high (#4219), which wins over the global
-  // enum. Its behavior is covered by base-executor-sanitize-effort.test.ts.
+  // The NATIVE deepseek provider has its own sanitizer branch (reasoningEffort.ts)
+  // — a {low, high, max} contract that maps medium → high (the #4219 floor,
+  // relaxed to admit `low` at the V4 GA on 2026-08-13). It wins over the global
+  // enum; medium clamping is covered by base-executor-sanitize-effort.test.ts.
   ["bai", "deepseek-v4-flash"],
   ["bai", "deepseek-v4-flash-vision-exp"],
   ["bai", "deepseek-v4-pro"],
+  // DeepSeek V4.1-Flash — same strict low|high|max enum, declared globally in
+  // MODEL_SPECS. The retired V4 ids route to it upstream, so both the
+  // user-facing id and the official wire id (deepseek-flash) resolve here.
+  ["bai", "deepseek-v4.1-flash"],
+  ["deepseek", "deepseek-flash"],
+  ["custom:idoomai", "deepseek-v4.1-flash"],
+  ["openai-compatible-chat", "deepseek-v4.1-flash"],
 ] as const;
 
 for (const [provider, model] of STRICT_MODELS) {

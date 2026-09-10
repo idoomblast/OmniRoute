@@ -62,6 +62,15 @@ const PROVIDER_MODEL_ALIASES: ProviderModelAliasMap = {
     "gemini-3.1-pro": "gemini-3.1-pro-preview",
     "gemini-3-1-pro": "gemini-3.1-pro-preview",
   },
+  deepseek: {
+    // DeepSeek V4.1-Flash (2026-09-10): the user-facing OmniRoute id maps onto
+    // the official upstream wire string `deepseek-flash`. The community beta
+    // string `deepseek-v4.1-flash-expires-on-0910` (pre-launch access) resolves
+    // to the same wire id. deepseek-v4-flash / -vision-exp are retired upstream
+    // and stay accepted via DeepSeek's own compatibility routing — no remap.
+    "deepseek-v4.1-flash": "deepseek-flash",
+    "deepseek-v4.1-flash-expires-on-0910": "deepseek-flash",
+  },
   nvidia: {
     "gpt-oss-120b": "openai/gpt-oss-120b",
     "nvidia/gpt-oss-120b": "openai/gpt-oss-120b",
@@ -600,7 +609,9 @@ async function resolveModelByProviderInference(modelId: string, extendedContext:
 
   // Canonicalize candidates (deduplicate alias providers pointing to the same provider ID)
   const canonicalCandidates = Array.from(
-    new Set(candidatesToUse.map((p) => resolveProviderAlias(p)).filter((p): p is string => p !== null))
+    new Set(
+      candidatesToUse.map((p) => resolveProviderAlias(p)).filter((p): p is string => p !== null)
+    )
   );
 
   // Filter candidates by active connections configured in the database

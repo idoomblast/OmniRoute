@@ -330,6 +330,16 @@ export const DEFAULT_PRICING_FRONTIER = {
       reasoning: 0.28,
       cache_creation: 0.07,
     },
+    // DeepSeek V4.1-Flash (2026-09-10) — official wire id `deepseek-flash`.
+    // Peak-hour rates per api-docs.deepseek.com/quick_start/pricing; off-peak
+    // is 50% of peak (01:00-04:00 & 06:00-10:00 UTC weekdays are peak).
+    "deepseek-flash": {
+      input: 0.3,
+      output: 1.2,
+      cached: 0.006,
+      reasoning: 1.2,
+      cache_creation: 0.3,
+    },
   },
   blackbox: {
     "gpt-4o": { input: 0, output: 0, cached: 0, reasoning: 0, cache_creation: 0 },

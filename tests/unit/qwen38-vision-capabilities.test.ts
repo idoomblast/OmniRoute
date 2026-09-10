@@ -94,3 +94,50 @@ test("qwen3.8 fragment does not leak into older text-only qwen3.5/3.6/3.7 (regre
     );
   }
 });
+
+test("DeepSeek V4.1-Flash family resolves vision capability across providers", () => {
+  // DeepSeek V4.1-Flash (2026-09-10) is the first Flash with native visual
+  // understanding (api-docs.deepseek.com/guides/vision). It must resolve true via
+  // the "deepseek-v4.1-flash" VISION_MODEL_ID_FRAGMENTS heuristic AND the global
+  // MODEL_SPECS entry (supportsVision: true) — covering the native provider,
+  // passthrough providers (bai), and custom providers that carry no registry
+  // entry. The official upstream wire id `deepseek-flash` resolves through the
+  // deepseek registry entry's own supportsVision flag.
+  for (const modelId of [
+    "deepseek-v4.1-flash",
+    "bai/deepseek-v4.1-flash",
+    "custom:idoomai/deepseek-v4.1-flash",
+    "openai-compatible-mycast/deepseek-v4.1-flash",
+    "deepseek/deepseek-v4.1-flash",
+    "deepseek-v4.1-flash-expires-on-0910",
+    "deepseek-flash",
+  ]) {
+    const capabilities = getResolvedModelCapabilities(modelId);
+    assert.equal(
+      capabilities.supportsVision,
+      true,
+      `${modelId} supports vision (native multimodal V4.1-Flash, image request must route)`
+    );
+  }
+});
+
+test("DeepSeek V4 (base) family stays TEXT-ONLY — fragment must not leak", () => {
+  // deepseek-v4-flash / deepseek-v4-pro are TEXT-ONLY (friendli.ai: "text-in,
+  // text-out"; vision arrived only via the separate -vision-exp id, itself
+  // retired and routed to V4.1). A bare "deepseek" or "deepseek-v4" fragment
+  // would re-create #4071 (image routed to a model that cannot see it).
+  for (const modelId of [
+    "deepseek-v4-flash",
+    "deepseek-v4-pro",
+    "ds/deepseek-v4-flash",
+    "bai/deepseek-v4-pro",
+    "deepseek-v3.2",
+    "deepseek-chat",
+  ]) {
+    assert.equal(
+      isVisionModelId(modelId),
+      false,
+      `${modelId} must NOT be flagged vision — V4 base family is text-only`
+    );
+  }
+});
