@@ -182,11 +182,11 @@ describe("OpencodeExecutor", () => {
     it("builds default headers for standard models", async () => {
       const result = await zenExecutor.execute(createInput("gpt-5-nano"));
 
-      assert.deepEqual(result.headers, {
-        Authorization: "Bearer test-key",
-        "Content-Type": "application/json",
-        Accept: "text/event-stream",
-      });
+      assert.equal(result.headers.Authorization, "Bearer test-key");
+      assert.equal(result.headers["Content-Type"], "application/json");
+      assert.equal(result.headers.Accept, "text/event-stream");
+      // Synthesized session id (Console Go contract) is always present.
+      assert.ok(result.headers["x-opencode-session"]);
       assert.deepEqual(fetchCalls[0].options.headers, result.headers);
     });
 
@@ -195,32 +195,34 @@ describe("OpencodeExecutor", () => {
         createInput("minimax-m2.7", true, { apiKey: "claude-key" })
       );
 
-      assert.deepEqual(result.headers, {
-        "x-api-key": "claude-key",
-        "Content-Type": "application/json",
-        "anthropic-version": "2023-06-01",
-        Accept: "text/event-stream",
-      });
+      assert.equal(result.headers["x-api-key"], "claude-key");
+      assert.equal(result.headers["Content-Type"], "application/json");
+      assert.equal(result.headers["anthropic-version"], "2023-06-01");
+      assert.equal(result.headers.Accept, "text/event-stream");
+      // Synthesized session id (Console Go contract) is always present.
+      assert.ok(result.headers["x-opencode-session"]);
       assert.deepEqual(fetchCalls[0].options.headers, result.headers);
     });
 
     it("omits accept header when stream is false", async () => {
       const result = await zenExecutor.execute(createInput("big-pickle", false));
 
-      assert.deepEqual(result.headers, {
-        Authorization: "Bearer test-key",
-        "Content-Type": "application/json",
-      });
+      assert.equal(result.headers.Authorization, "Bearer test-key");
+      assert.equal(result.headers["Content-Type"], "application/json");
+      assert.equal(result.headers.Accept, undefined);
+      // Synthesized session id (Console Go contract) is still injected.
+      assert.ok(result.headers["x-opencode-session"]);
       assert.deepEqual(fetchCalls[0].options.headers, result.headers);
     });
 
     it("omits authorization when credentials are missing", async () => {
       const result = await zenExecutor.execute(createInput("minimax-m2.5-free", true, null));
 
-      assert.deepEqual(result.headers, {
-        "Content-Type": "application/json",
-        Accept: "text/event-stream",
-      });
+      assert.equal(result.headers["Content-Type"], "application/json");
+      assert.equal(result.headers.Accept, "text/event-stream");
+      assert.equal(result.headers.Authorization, undefined);
+      // Synthesized session id (Console Go contract) is still injected.
+      assert.ok(result.headers["x-opencode-session"]);
       assert.deepEqual(fetchCalls[0].options.headers, result.headers);
     });
 
@@ -267,11 +269,12 @@ describe("OpencodeExecutor", () => {
 
       const result = await goExecutor.execute(createInput("glm-5.1"));
 
-      assert.deepEqual(result.headers, {
-        Authorization: "Bearer test-key",
-        "Content-Type": "application/json",
-        Accept: "text/event-stream",
-      });
+      assert.equal(result.headers.Authorization, "Bearer test-key");
+      assert.equal(result.headers["Content-Type"], "application/json");
+      assert.equal(result.headers.Accept, "text/event-stream");
+      // Console Go 400s without x-opencode-session — a synthesized session id
+      // must be present when the client sent none.
+      assert.ok(result.headers["x-opencode-session"]);
       assert.deepEqual(fetchCalls[0].options.headers, result.headers);
     });
 

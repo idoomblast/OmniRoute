@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { BaseExecutor, type ExecuteInput, type ProviderCredentials } from "./base.ts";
 import { PROVIDERS, MAX_TOOLS_LIMIT } from "../config/constants.ts";
 import { getModelTargetFormat } from "../config/providerModels.ts";
@@ -6,7 +7,8 @@ import {
   isThinkingMessageModel,
 } from "../utils/reasoningContentInjector.ts";
 import { runWithProxyContext } from "../utils/proxyFetch.ts";
-import { forwardOpencodeClientHeaders } from "../utils/opencodeHeaders.ts";
+import { findHeader, forwardOpencodeClientHeaders } from "../utils/opencodeHeaders.ts";
+import { generateSessionId } from "../services/sessionManager.ts";
 
 /**
  * Per-account proxy configuration, persisted by NoAuthAccountCard under
@@ -86,6 +88,56 @@ export function parseEffortLevel(model: string): { baseModel: string; effort: st
     }
   }
   return null;
+}
+
+/**
+ * Client headers that carry a caller session identity and can stand in for
+ * x-opencode-session when the client did not send one (first match wins).
+ * x-session-affinity / x-session-id mirror the existing synthesizeRequestId
+ * mapping; x-omniroute-session-id is OmniRoute's native session header.
+ */
+const OPENCODE_SESSION_FALLBACK_HEADERS = [
+  "x-session-affinity",
+  "x-session-id",
+  "x-omniroute-session-id",
+] as const;
+
+/**
+ * Console Go (opencode.ai/zen/go) hard-requires x-opencode-session and 400s
+ * "Request is missing x-opencode-session and cannot be routed efficiently"
+ * when it is absent (production, 2026-09-14, opencode-go/deepseek-v4.1-flash).
+ * The OpenCode CLI always sends it — a stable id per conversation — plus a
+ * self-identifying User-Agent; docs (opencode.ai/docs/go) ask clients for
+ * exactly that. Resolution order (client values always win, per #5997):
+ *   1. client x-opencode-session → passthrough, nothing to do
+ *   2. client x-session-affinity / x-session-id / x-omniroute-session-id
+ *   3. conversation fingerprint (sessionManager.generateSessionId) → stable
+ *      across the turns of one conversation, unique across conversations
+ *   4. random UUID → opaque but satisfies the header-present contract
+ * Returns a shallow copy of the input with the id injected into a copied
+ * clientHeaders record (the caller's object is read-only and is never
+ * mutated); OpencodeExecutor.buildHeaders forwards it from there.
+ */
+export function withSynthesizedOpencodeSession(
+  input: ExecuteInput,
+  provider: string
+): ExecuteInput {
+  const clientHeaders = input.clientHeaders;
+  if (clientHeaders && findHeader(clientHeaders, "x-opencode-session")) {
+    return input;
+  }
+  const fromClient = clientHeaders
+    ? OPENCODE_SESSION_FALLBACK_HEADERS.map((name) => findHeader(clientHeaders, name)).find(
+        (value): value is string => Boolean(value)
+      )
+    : undefined;
+  const body = (typeof input.body === "object" && input.body !== null ? input.body : null) as
+    Parameters<typeof generateSessionId>[0] | null;
+  const sessionId = fromClient || generateSessionId(body, { provider }) || randomUUID();
+  return {
+    ...input,
+    clientHeaders: { ...(clientHeaders ?? {}), "x-opencode-session": sessionId },
+  };
 }
 
 export class OpencodeExecutor extends BaseExecutor {
@@ -186,13 +238,17 @@ export class OpencodeExecutor extends BaseExecutor {
     try {
       this.syncAccountsFromCredentials(input.credentials);
 
+      // Console Go 400s without x-opencode-session; synthesize a stable one when
+      // the client sent no session identity (see withSynthesizedOpencodeSession).
+      const prepared = withSynthesizedOpencodeSession(input, this.provider);
+
       const hasProxies = this.accounts.some((a) => a.proxy !== null);
       // Fast path: no multi-account proxy wiring configured → original behavior.
       if (this.accounts.length === 1 && !hasProxies) {
-        return await super.execute(input);
+        return await super.execute(prepared);
       }
 
-      const { log } = input;
+      const { log } = prepared;
       let lastResult: Awaited<ReturnType<BaseExecutor["execute"]>> | null = null;
 
       for (let attempt = 0; attempt < this.accounts.length; attempt++) {
@@ -214,7 +270,7 @@ export class OpencodeExecutor extends BaseExecutor {
         // (incl. its intra-URL 429 retries). skipUpstreamRetry lets THIS loop own
         // the cross-account 429 fallback instead of BaseExecutor's same-key retry.
         const result = await runWithProxyContext(account.proxy, () =>
-          super.execute({ ...input, skipUpstreamRetry: true })
+          super.execute({ ...prepared, skipUpstreamRetry: true })
         );
         lastResult = result;
 
@@ -230,7 +286,7 @@ export class OpencodeExecutor extends BaseExecutor {
       }
 
       // All accounts returned 429 (or errored) — surface the last response.
-      return lastResult ?? (await super.execute(input));
+      return lastResult ?? (await super.execute(prepared));
     } finally {
       this._requestFormat = null;
     }

@@ -24,7 +24,7 @@ const AGENT_METADATA_HEADER_KEYS = ["x-session-id", "x-title"] as const;
 /**
  * Case-insensitive lookup for a header in a headers record.
  */
-function findHeader(headers: Record<string, string>, name: string): string | undefined {
+export function findHeader(headers: Record<string, string>, name: string): string | undefined {
   return Object.entries(headers).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1];
 }
 
