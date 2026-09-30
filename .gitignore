@@ -301,3 +301,6 @@ docker-compose.yml.bak
 
 # run-translation.mjs writes the state atomically via a per-process temp file
 /.i18n-state.json.*.tmp
+
+# Untracked experimental module — not part of any commit, never track
+/src/shared/services/objectEndpoint.ts
