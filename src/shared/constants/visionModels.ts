@@ -29,6 +29,11 @@ export const VISION_MODEL_ID_FRAGMENTS = [
   "qwen2-vl",
   "qwen2.5-vl",
   "qwen3-vl",
+  // qwen3.8 family is multimodal (flash/max/plus/27b). bai is a passthrough
+  // provider so qwen3.8-flash has no registry entry — the fragment heuristic
+  // covers the whole family across all providers. Stays narrow enough not to
+  // leak into text-only qwen3.5/3.6/3.7 (regression #2822).
+  "qwen3.8",
   "qvq",
   "internvl",
   "minicpm-v",
