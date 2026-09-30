@@ -226,6 +226,9 @@ async function fetchQoderCatalogRaw(
       headers,
       signal: controller.signal,
     });
+  } catch {
+    // JSDoc promises null on any error — network/DNS/abort must not propagate.
+    return null;
   } finally {
     if (timer) clearTimeout(timer);
     if (signal && abortListener) signal.removeEventListener("abort", abortListener);

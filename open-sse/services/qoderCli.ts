@@ -835,12 +835,18 @@ export async function exchangeQoderJobToken(
   options: { fetchImpl?: FetchLike; signal?: AbortSignal | null } = {}
 ): Promise<{ jobToken: string; expiresInMs: number } | null> {
   const fetchImpl = options.fetchImpl || (fetch as unknown as FetchLike);
-  const res = await fetchImpl(QODER_JOB_TOKEN_EXCHANGE_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ personal_token: pat }),
-    signal: options.signal || AbortSignal.timeout(15000),
-  });
+  let res: Response;
+  try {
+    res = await fetchImpl(QODER_JOB_TOKEN_EXCHANGE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ personal_token: pat }),
+      signal: options.signal || AbortSignal.timeout(15000),
+    });
+  } catch {
+    // Network/abort errors → graceful null (callers fall back to original token)
+    return null;
+  }
   if (!res || !res.ok) return null;
   let json: unknown = null;
   try {
