@@ -14,13 +14,6 @@ export const command_codeProvider: RegistryEntry = {
   defaultContextLength: 200000,
   models: [
     {
-      id: "x-preview-f-free",
-      name: "X Preview F Free (CC)",
-      supportsReasoning: true,
-      supportsVision: true,
-      supportedThinkingEfforts: ["low", "high", "max"],
-    },
-    {
       id: "claude-opus-4-7",
       name: "Claude Opus 4.7 (CC)",
       supportsReasoning: true,
