@@ -182,14 +182,6 @@ export class GithubExecutor extends BaseExecutor {
       });
     }
 
-    if (modifiedBody.response_format && model.toLowerCase().includes("claude")) {
-      modifiedBody.messages = this.injectResponseFormat(
-        Array.isArray(modifiedBody.messages) ? modifiedBody.messages : [],
-        modifiedBody.response_format
-      );
-      delete modifiedBody.response_format;
-    }
-
     if (Array.isArray(modifiedBody.tools) && modifiedBody.tools.length > MAX_TOOLS_LIMIT) {
       modifiedBody.tools = modifiedBody.tools.slice(0, MAX_TOOLS_LIMIT);
     }

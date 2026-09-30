@@ -697,6 +697,9 @@ export class QoderExecutor extends BaseExecutor {
           signal,
         });
       } catch (cosyErr) {
+        // Re-throw abort errors immediately — user-initiated cancellation must not
+        // trigger a qodercli fallback that delays the abort.
+        if (cosyErr?.name === "AbortError") throw cosyErr;
         return this.executeViaQoderCli({ model: resolvedModel, body, stream, token, signal });
       }
     }

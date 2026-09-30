@@ -870,7 +870,7 @@ export async function resolveQoderJobToken(
 
   let pending = qoderJobTokenPending.get(trimmed);
   if (!pending) {
-    pending = exchangeQoderJobToken(trimmed, { fetchImpl: options.fetchImpl }).finally(() => {
+    pending = exchangeQoderJobToken(trimmed, { fetchImpl: options.fetchImpl, signal: options.signal }).finally(() => {
       qoderJobTokenPending.delete(trimmed);
     });
     qoderJobTokenPending.set(trimmed, pending);
