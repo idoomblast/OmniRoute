@@ -168,16 +168,21 @@ test("resolveQoderJobToken: deduplicates concurrent exchanges", async () => {
   assert.equal(callCount, 1);
 });
 
-test("resolveQoderJobToken: respects abort signal", async () => {
+test("resolveQoderJobToken: throws on already-aborted signal", async () => {
   __clearQoderJobTokenCache();
   const controller = new AbortController();
   const fetchImpl = async (_input: string, init?: Record<string, unknown>) => {
-    const signal = init?.signal as AbortSignal;
-    if (signal?.aborted) throw new DOMException("aborted", "AbortError");
-    return new Response("{}", { status: 200 });
+    return new Response(JSON.stringify({ job_token: "jt-never", expires_in: 9999 }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
   };
   controller.abort();
-  // With an already-aborted signal, the exchange should fail and fall back
-  const result = await resolveQoderJobToken("pt-abort", { fetchImpl, signal: controller.signal });
-  assert.equal(result, "pt-abort");
+  // With an already-aborted signal, the waiter should reject immediately
+  // (per-caller abort does not poison the shared exchange, but does reject
+  // the individual waiter).
+  await assert.rejects(
+    resolveQoderJobToken("pt-abort", { fetchImpl, signal: controller.signal }),
+    /aborted/i
+  );
 });

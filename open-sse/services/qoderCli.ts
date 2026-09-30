@@ -876,10 +876,32 @@ export async function resolveQoderJobToken(
 
   let pending = qoderJobTokenPending.get(trimmed);
   if (!pending) {
-    pending = exchangeQoderJobToken(trimmed, { fetchImpl: options.fetchImpl, signal: options.signal }).finally(() => {
+    // Decouple the shared exchange from per-caller abort signals: the first
+    // caller's signal must not poison the shared fetch for concurrent waiters.
+    // The exchange runs under its own 15s timeout (inside exchangeQoderJobToken).
+    pending = exchangeQoderJobToken(trimmed, { fetchImpl: options.fetchImpl }).finally(() => {
       qoderJobTokenPending.delete(trimmed);
     });
     qoderJobTokenPending.set(trimmed, pending);
+  }
+  // Per-caller abort: reject only this waiter, not the shared fetch.
+  if (options.signal) {
+    if (options.signal.aborted) throw options.signal.reason ?? new Error("aborted");
+    const waiter = new Promise((resolve, reject) => {
+      options.signal!.addEventListener(
+        "abort",
+        () => reject(options.signal!.reason ?? new Error("aborted")),
+        { once: true }
+      );
+      pending.then(resolve, reject);
+    });
+    const exchanged = (await waiter) as { jobToken: string; expiresInMs: number } | null;
+    if (!exchanged) return trimmed;
+    qoderJobTokenCache.set(trimmed, {
+      jobToken: exchanged.jobToken,
+      expiresAt: now + exchanged.expiresInMs,
+    });
+    return exchanged.jobToken;
   }
   const exchanged = await pending;
   if (!exchanged) return trimmed; // graceful fallback — keep prior behavior
