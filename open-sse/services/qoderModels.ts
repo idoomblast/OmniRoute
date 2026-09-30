@@ -24,7 +24,7 @@ import {
   QODER_IDE_VERSION,
   QODER_CLIENT_TYPE,
 } from "../shared/qoder/constants.ts";
-import { isQoderPatToken, resolveQoderJobToken } from "./qoderCli.ts";
+import { isQoderPatToken, exchangeQoderJobToken } from "./qoderCli.ts";
 
 const FETCH_TIMEOUT_MS = 15_000;
 const CATALOG_TTL_MS = 60 * 60 * 1000; // 1h
@@ -102,20 +102,21 @@ async function resolvePatCredential(
   const cached = patJobCache.get(pat);
   if (cached && cached.expiresAt - now > PAT_REFRESH_BUFFER_MS) return cached;
 
-  const jobToken = await resolveQoderJobToken(pat, { signal });
-  if (!jobToken || !jobToken.startsWith("jt-")) {
-    // resolveQoderJobToken falls back to the raw PAT on exchange failure —
-    // a `pt-*` in the Cosy envelope is rejected upstream, so surface the error.
+  // Call exchangeQoderJobToken directly (not resolveQoderJobToken) so we get
+  // the server-provided expiresInMs instead of hardcoding a 23h TTL.
+  const exchanged = await exchangeQoderJobToken(pat, { signal });
+  if (!exchanged || !exchanged.jobToken.startsWith("jt-")) {
+    // Exchange failure — a `pt-*` in the Cosy envelope is rejected upstream,
+    // so surface the error.
     throw new Error("qoder PAT exchange failed: no job token returned");
   }
-  const userId = await fetchUserIdForJobToken(jobToken, signal);
-  const resolved = { accessToken: jobToken, userId, expiresAt: now + PAT_DEFAULT_TTL_MS };
+  const userId = await fetchUserIdForJobToken(exchanged.jobToken, signal);
+  const resolved = { accessToken: exchanged.jobToken, userId, expiresAt: now + exchanged.expiresInMs };
   patJobCache.set(pat, resolved);
   return resolved;
 }
 
 const PAT_REFRESH_BUFFER_MS = 5 * 60 * 1000;
-const PAT_DEFAULT_TTL_MS = 23 * 60 * 60 * 1000;
 
 type QoderCredentials = Record<string, unknown> & {
   apiKey?: unknown;

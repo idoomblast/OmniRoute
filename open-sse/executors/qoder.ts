@@ -930,7 +930,7 @@ export class QoderExecutor extends BaseExecutor {
         response: new Response(
           JSON.stringify({
             error: {
-              message: `Qoder COSY request failed with status ${response.status}: ${errText}`,
+              message: sanitizeErrorMessage(`Qoder COSY request failed with status ${response.status}: ${errText}`),
               type:
                 response.status === 401 || response.status === 403
                   ? "authentication_error"
