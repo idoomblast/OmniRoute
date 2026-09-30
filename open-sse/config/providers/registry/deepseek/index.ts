@@ -50,6 +50,7 @@ export const deepseekProvider: RegistryEntry = {
       maxOutputTokens: 384_000,
       supportsReasoning: true,
       supportedThinkingEfforts: ["none", "low", "high", "max"],
+      supportsVision: true,
       toolCalling: true,
     },
   ],

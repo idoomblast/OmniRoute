@@ -58,6 +58,10 @@ export const VISION_MODEL_ID_FRAGMENTS = [
   "glm-4.5v",
   "glm-4.6v",
   "glm-5.3",
+  // DeepSeek V4.1-Flash is the first Flash with native visual understanding
+  // (JPEG/PNG/GIF/WebP via image_url blocks). The V4 base family stays text-only.
+  "deepseek-v4.1-flash",
+  "deepseek-flash",
   "gpt-4o",
   "gpt-4.1",
   "gpt-4-turbo",
