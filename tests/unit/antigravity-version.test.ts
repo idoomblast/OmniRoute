@@ -24,8 +24,8 @@ test.afterEach(() => {
 test("IDE and CLI start with independent captured fallback versions", () => {
   assert.equal(getCachedAntigravityIdeVersion(), ANTIGRAVITY_IDE_FALLBACK_VERSION);
   assert.equal(getCachedAntigravityCliVersion(), ANTIGRAVITY_CLI_FALLBACK_VERSION);
-  assert.equal(ANTIGRAVITY_IDE_FALLBACK_VERSION, "2.1.1");
-  assert.equal(ANTIGRAVITY_CLI_FALLBACK_VERSION, "1.1.5");
+  assert.equal(ANTIGRAVITY_IDE_FALLBACK_VERSION, "2.8.1");
+  assert.equal(ANTIGRAVITY_CLI_FALLBACK_VERSION, "1.1.13");
 });
 
 test("IDE resolver reads the official updater feed and caches only the IDE version", async () => {
@@ -46,7 +46,7 @@ test("IDE resolver reads the official updater feed and caches only the IDE versi
     "https://antigravity-auto-updater-974169037036.us-central1.run.app/releases"
   );
   assert.equal(getCachedAntigravityIdeVersion(), "2.2.0");
-  assert.equal(getCachedAntigravityCliVersion(), "1.1.5");
+  assert.equal(getCachedAntigravityCliVersion(), "1.1.13");
 });
 
 test("IDE resolver selects the newest feed entry and never falls below its version floor", async () => {
@@ -111,13 +111,13 @@ test("CLI resolver reads the official Google GitHub release and caches only the 
     "https://api.github.com/repos/google-antigravity/antigravity-cli/releases/latest"
   );
   assert.equal(getCachedAntigravityCliVersion(), "1.2.0");
-  assert.equal(getCachedAntigravityIdeVersion(), "2.1.1");
+  assert.equal(getCachedAntigravityIdeVersion(), "2.8.1");
 });
 
 test("IDE and CLI TTL refreshes are independent", async () => {
   let now = 1_000;
   Date.now = () => now;
-  seedAntigravityCliVersionCache("1.1.5", now);
+  seedAntigravityCliVersionCache("1.1.13", now);
 
   const firstFetch = async () =>
     new Response(JSON.stringify([{ version: "2.2.0" }]), {
@@ -133,7 +133,7 @@ test("IDE and CLI TTL refreshes are independent", async () => {
   assert.equal(await resolveAntigravityIdeVersion(firstFetch as typeof fetch), "2.2.0");
   now += ANTIGRAVITY_VERSION_CACHE_TTL_MS + 1;
   assert.equal(await resolveAntigravityIdeVersion(secondFetch as typeof fetch), "2.3.0");
-  assert.equal(getCachedAntigravityCliVersion(), "1.1.5");
+  assert.equal(getCachedAntigravityCliVersion(), "1.1.13");
 });
 
 test("each resolver falls back only to its own last known good version", async () => {
