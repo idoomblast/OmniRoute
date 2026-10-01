@@ -141,7 +141,7 @@ describe("ensureAntigravityProjectAssigned", () => {
 
     assert.match(
       capturedHeaders?.get("User-Agent") || "",
-      /^antigravity\/cli\/1\.1\.5 \(aidev_client; os_type=.+; arch=.+; auth_method=consumer\)$/
+      /^antigravity\/cli\/1\.1\.13 \(aidev_client; os_type=.+; arch=.+; auth_method=consumer\)$/
     );
     assert.equal(capturedHeaders?.get("X-Goog-Api-Client"), null);
     assert.equal(capturedHeaders?.get("Client-Metadata"), null);
@@ -156,7 +156,7 @@ describe("ensureAntigravityProjectAssigned", () => {
 
     await ensureAntigravityProjectAssigned("ide-token", mockFetch);
 
-    assert.match(capturedHeaders?.get("User-Agent") || "", /^antigravity\/ide\/2\.1\.1 /);
+    assert.match(capturedHeaders?.get("User-Agent") || "", /^antigravity\/ide\/2\.8\.1 /);
     assert.equal(capturedHeaders?.get("X-Goog-Api-Client"), null);
     assert.equal(capturedHeaders?.get("Client-Metadata"), null);
   });

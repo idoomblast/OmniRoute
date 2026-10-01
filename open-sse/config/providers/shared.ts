@@ -171,6 +171,15 @@ export interface RegistryEntry {
    */
   unsupportedParams?: readonly string[];
   /**
+   * Whether a non-empty synchronized live model list is exhaustive enough
+   * to reject static registry IDs that it omits.
+   *
+   * Defaults to true. Set this explicitly to false for providers whose
+   * discovery endpoint is known to return only a partial subset of the models
+   * that the provider can route.
+   */
+  liveCatalogAuthoritative?: boolean;
+  /**
    * True for strict/naive OpenAI-compatible backends that reject a single-text-part
    * content array (`[{ type: "text", text }]`) and only accept the equivalent plain
    * string. Used by the Responses→Chat translator to collapse single-part text
