@@ -171,6 +171,8 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const ALL_COMBOS_ACCESS_RULE = "combo/*";
+
 function normalizeComboAccessName(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -179,6 +181,11 @@ function normalizeComboAccessName(value: unknown): string | null {
 }
 
 function matchesComboAccessRule(comboName: string, requestedModel: string, rule: string): boolean {
+  // Newer builds (v3.8.51+, migration 149) store `combo/*` as the explicit
+  // "allow all combos" marker; [] means "deny all" there. This line predates
+  // that marker, so accept it as allow-all to keep databases migrated by a
+  // newer build working after a rollback (see fork rollback 2026-10-02).
+  if (rule === ALL_COMBOS_ACCESS_RULE) return true;
   const normalizedRule = normalizeComboAccessName(rule);
   if (!normalizedRule) return false;
   return (

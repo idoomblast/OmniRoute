@@ -643,3 +643,30 @@ test("enforceApiKeyPolicy enforces request-per-minute limits and returns success
   assert.equal(second.rejection.status, 429);
   assert.match(await readErrorMessage(second.rejection), /Request limit exceeded/);
 });
+
+test("enforceApiKeyPolicy accepts combo/* as allow-all (v3.8.51 migration-149 marker)", async () => {
+  const wildcardKey = await createKeyWithPolicy({ allowedCombos: ["combo/*"] });
+  const strictKey = await createKeyWithPolicy({ allowedCombos: ["other-chat"] });
+  await combosDb.createCombo({
+    name: "wild-chat",
+    strategy: "priority",
+    models: ["openai/gpt-4.1"],
+  });
+  const policy = await loadPolicy("combo-wildcard");
+
+  const viaPrefix = await policy.enforceApiKeyPolicy(
+    makePolicyRequest(wildcardKey.key),
+    "combo/wild-chat"
+  );
+  assert.equal(viaPrefix.rejection, null);
+
+  const direct = await policy.enforceApiKeyPolicy(makePolicyRequest(wildcardKey.key), "wild-chat");
+  assert.equal(direct.rejection, null);
+
+  const strict = await policy.enforceApiKeyPolicy(
+    makePolicyRequest(strictKey.key),
+    "combo/wild-chat"
+  );
+  assert.equal(strict.rejection.status, 403);
+  assert.match(await readErrorMessage(strict.rejection), /Combo "wild-chat" is not allowed/);
+});
