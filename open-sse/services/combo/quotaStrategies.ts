@@ -24,6 +24,7 @@
 import { getRuntimeProviderProfile, type ProviderProfile } from "../accountFallback.ts";
 import { PRE_SCREEN_CONCURRENCY } from "../comboConfig.ts";
 import { getQuotaFetcher } from "../quotaPreflight.ts";
+import { getQuotaFetchScope } from "../antigravityQuotaFamily.ts";
 import { getCircuitBreaker } from "../../../src/shared/utils/circuitBreaker";
 import { getCachedProviderConnections } from "../../../src/lib/db/readCache";
 import { MAX_RR_COUNTERS, rrCounters } from "./rrState.ts";
@@ -238,14 +239,20 @@ async function scoreQuotaAwareTargets<TScore extends object>({
       const provider = getResetAwareProvider(target);
       const fetcher = provider ? getQuotaFetcher(provider) : null;
       if (fetcher && provider && target.connectionId) {
-        const quotaKey = `${provider}:${target.connectionId}`;
+        const quotaKey = `${provider}:${target.connectionId}:${getQuotaFetchScope(
+          provider,
+          target.modelStr
+        )}`;
         if (!quotaPromises.has(quotaKey)) {
+          const connection = connectionById.get(target.connectionId);
           quotaPromises.set(
             quotaKey,
             fetchResetAwareQuotaWithCache({
               provider,
               connectionId: target.connectionId,
-              connection: connectionById.get(target.connectionId),
+              connection: connection
+                ? { ...connection, requestedModel: target.modelStr }
+                : connection,
               fetcher,
               config,
               log,
@@ -323,7 +330,10 @@ export async function fetchResetAwareQuotaWithCache({
   log: { debug?: (...args: unknown[]) => void; warn?: (...args: unknown[]) => void };
   comboName: string;
 }): Promise<unknown> {
-  const cacheKey = `${provider}:${connectionId}`;
+  const requestedModel =
+    typeof connection?.requestedModel === "string" ? connection.requestedModel : null;
+  const cacheScope = getQuotaFetchScope(provider, requestedModel);
+  const cacheKey = `${provider}:${connectionId}:${cacheScope}`;
   const ttlMs = config.quotaCacheTtlMs;
   const maxStaleMs = config.quotaCacheMaxStaleMs;
   const now = Date.now();

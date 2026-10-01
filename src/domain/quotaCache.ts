@@ -24,7 +24,7 @@ import {
 } from "@/lib/db/quotaSnapshots";
 import { recordProviderQuotaResetEventIfChanged } from "@/lib/db/quotaResetEvents";
 import { getCodexQuotaWindowFilterForModel } from "@omniroute/open-sse/config/codexQuotaScopes.ts";
-import { getAntigravityQuotaFamily } from "@omniroute/open-sse/services/antigravityQuotaFamily.ts";
+import { selectAntigravityQuotaWindowNames } from "@omniroute/open-sse/services/antigravityQuotaFamily.ts";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -244,14 +244,7 @@ function isAntigravityQuotaExhausted(
   if (!requestedModel) return entry.exhausted;
   const quotaNames = Object.keys(entry.quotas || {});
   if (quotaNames.length === 0) return entry.exhausted;
-  const requestedFamily = getAntigravityQuotaFamily(requestedModel);
-  const cleanRequestedModel = requestedModel.replace(/^(antigravity|agy)\//, "");
-  const matchingWindows = quotaNames.filter((windowName) => {
-    if (requestedFamily === "other") {
-      return windowName.replace(/^(antigravity|agy)\//, "") === cleanRequestedModel;
-    }
-    return getAntigravityQuotaFamily(windowName) === requestedFamily;
-  });
+  const matchingWindows = selectAntigravityQuotaWindowNames(quotaNames, requestedModel);
   return (
     matchingWindows.length > 0 &&
     matchingWindows.every(

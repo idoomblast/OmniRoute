@@ -57,6 +57,7 @@ import { getHiddenModelsByProvider } from "@/models";
 import { resolveModelLockoutSettings } from "../../src/lib/resilience/modelLockoutSettings";
 import { fetchCodexQuota } from "./codexQuotaFetcher.ts";
 import { evaluateQuotaCutoff, getQuotaFetcher, type QuotaInfo } from "./quotaPreflight.ts";
+import { getQuotaFetchScope } from "./antigravityQuotaFamily.ts";
 import * as semaphore from "./rateLimitSemaphore.ts";
 import { getCircuitBreaker } from "../../src/shared/utils/circuitBreaker";
 import { parseModel } from "./model.ts";
@@ -468,14 +469,17 @@ export async function buildAutoCandidates(
         statusPenaltyReason = connectionStatusReason;
       }
       if (fetcher && target.connectionId) {
-        const quotaKey = `${provider}:${target.connectionId}`;
+        const quotaScope = getQuotaFetchScope(provider, target.modelStr);
+        const quotaKey = `${provider}:${target.connectionId}:${quotaScope}`;
         if (!quotaPromises.has(quotaKey)) {
           quotaPromises.set(
             quotaKey,
             fetchResetAwareQuotaWithCache({
               provider,
               connectionId: target.connectionId,
-              connection,
+              connection: connection
+                ? { ...connection, requestedModel: target.modelStr }
+                : connection,
               fetcher,
               config: resetWindowConfig,
               log: {},
@@ -486,12 +490,20 @@ export async function buildAutoCandidates(
         const quota = await quotaPromises.get(quotaKey)!;
         resetWindowAffinity = calculateResetWindowAffinity(quota, resetWindowConfig);
         if (!quotaCutoffBlocked) {
-          quotaRemaining = quotaRemainingPercentFromQuota(quota);
+          quotaRemaining = quotaRemainingPercentFromQuota(quota, {
+            provider,
+            requestedModel: target.modelStr,
+          });
         }
         if (!quotaCutoffBlocked && quotaCutoffEnabled) {
           const cutoffDecision = evaluateQuotaCutoff(
             quota as QuotaInfo | null,
-            buildAutoQuotaThresholds(provider, connection, resilienceSettings)
+            buildAutoQuotaThresholds(provider, connection, resilienceSettings),
+            {
+              provider,
+              requestedModel: target.modelStr,
+              providerSpecificData: connection?.providerSpecificData,
+            }
           );
           if (!cutoffDecision.proceed) {
             quotaCutoffBlocked = true;
@@ -960,7 +972,8 @@ export async function handleComboChat({
             resilienceSettings,
             quotaCutoffResetWindowConfig,
             combo.name,
-            log
+            log,
+            modelStr
           );
           if (quotaCutoff.blocked) {
             log.info(
