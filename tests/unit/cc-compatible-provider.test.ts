@@ -771,9 +771,13 @@ test("handleChatCore preserves client cache markers for Claude Code requests to 
 
   assert.equal(result.success, true);
   assert.equal(calls.length, 1);
-  assert.match(calls[0].body.system[0].text, /Claude Agent SDK/);
+  // 276f: CC-compatible providers enter the Claude CC cloak block, so base.ts
+  // prepends [billing, sentinel] ahead of the SDK identity + client blocks.
+  assert.match(calls[0].body.system[0].text, /^x-anthropic-billing-header: cc_version=/);
   assert.equal(calls[0].body.system[0].cache_control, undefined);
-  assert.deepEqual(calls[0].body.system[1].cache_control, {
+  assert.equal(calls[0].body.system[1].cache_control, undefined);
+  assert.match(calls[0].body.system[2].text, /Claude Agent SDK/);
+  assert.deepEqual(calls[0].body.system[3].cache_control, {
     type: "ephemeral",
     ttl: "5m",
   });
@@ -785,10 +789,9 @@ test("handleChatCore preserves client cache markers for Claude Code requests to 
     ttl: "10m",
   });
   assert.equal(calls[0].body.messages[2].content[0].cache_control, undefined);
-  assert.deepEqual(calls[0].body.tools[0].cache_control, {
-    type: "ephemeral",
-    ttl: "30m",
-  });
+  // 276f: the CC cloak block strips tools cache_control for Claude Code clients
+  // (same rule as the native claude path); message markers above stay preserved.
+  assert.equal(calls[0].body.tools[0].cache_control, undefined);
 });
 
 test("provider-nodes create route rejects CC mode when feature flag is disabled", async () => {

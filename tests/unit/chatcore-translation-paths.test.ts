@@ -855,10 +855,14 @@ test("chatCore normalizes native Claude Code messages before CC-compatible relay
   // After normalization: role:"system" msg extracted → top-level system (3 msgs remain, not 4)
   assert.equal(call.body.messages.length, 3);
 
-  // CC bridge prepends its own system block; extracted system block is appended after it
+  // CC bridge prepends its dynamic billing/fingerprint blocks; the SDK identity
+  // and extracted system block must both remain present regardless of position.
   assert.equal(
-    call.body.system[0].text,
-    "You are a Claude agent, built on Anthropic's Claude Agent SDK."
+    call.body.system.some(
+      (block: { text?: string }) =>
+        block.text === "You are a Claude agent, built on Anthropic's Claude Agent SDK."
+    ),
+    true
   );
   assert.equal(
     call.body.system.some(

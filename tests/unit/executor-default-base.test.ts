@@ -667,9 +667,12 @@ test("DefaultExecutor.execute uses CC-compatible connection defaults to append 1
   }
 
   assert.equal(calls[0].headers["anthropic-beta"].includes(CONTEXT_1M_BETA_HEADER), false);
+  // 276f: CC-compatible providers enter the Claude CC cloak block; the opaque-client
+  // beta set (selectBetaFlags) therefore carries redact-thinking even without
+  // requestDefaults.redactThinking.
   assert.equal(
     calls[0].headers["anthropic-beta"].includes(CLAUDE_CODE_COMPATIBLE_REDACT_THINKING_BETA),
-    false
+    true
   );
   assert.equal(calls[1].headers["anthropic-beta"].includes(CONTEXT_1M_BETA_HEADER), true);
   assert.equal(
