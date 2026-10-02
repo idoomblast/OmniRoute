@@ -57,8 +57,8 @@ test("Claude CLI wire versions match the captured 2.1.219 binary", () => {
   assert.equal(hdr.CLAUDE_CLI_BILLING_VERSION, canonical.CLAUDE_CODE_CLIENT_BILLING_VERSION);
 });
 
-test("Codex client is pinned to the captured 0.144.1 release", () => {
-  assert.equal(codexCfg.getCodexClientVersion(), "0.144.1");
-  assert.equal(codexCfg.getCodexUserAgent(), "codex-cli/0.144.1 (Windows 10.0.26200; x64)");
-  assert.equal(codexCfg.getCodexDefaultHeaders().Version, "0.144.1");
+test("Codex client is pinned to the captured 0.159.2 release", () => {
+  assert.equal(codexCfg.getCodexClientVersion(), "0.159.2");
+  assert.equal(codexCfg.getCodexUserAgent(), "codex-cli/0.159.2 (Windows 10.0.26200; x64)");
+  assert.equal(codexCfg.getCodexDefaultHeaders().Version, "0.159.2");
 });

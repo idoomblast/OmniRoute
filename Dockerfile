@@ -260,6 +260,6 @@ RUN --mount=type=cache,id=apt-cache,target=/var/cache/apt,sharing=locked \
 # blocked.
 RUN --mount=type=cache,id=npm-cache,target=/root/.npm \
   npm install -g --no-audit --no-fund --allow-scripts=@anthropic-ai/claude-code,@qoder-ai/qodercli,droid,openclaw,sharp,@google/genai,tree-sitter-bash,protobufjs \
-    @openai/codex @anthropic-ai/claude-code droid openclaw@latest @qoder-ai/qodercli
+    @openai/codex@0.159.2 @anthropic-ai/claude-code droid openclaw@latest @qoder-ai/qodercli
 
 USER node
