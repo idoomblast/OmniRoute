@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 const { OpencodeExecutor } = await import("../../open-sse/executors/opencode.ts");
 const { MimocodeExecutor } = await import("../../open-sse/executors/mimocode.ts");
+const { MAX_TOOLS_LIMIT } = await import("../../open-sse/config/constants.ts");
 
 /**
  * Behavioral guards for the three type-only fixes in the TS 7 executor slice
@@ -34,15 +35,24 @@ describe("OpencodeExecutor — tools truncation survives the narrowing fix", () 
     };
   }
 
-  it("truncates an over-long tools array to 128 entries", () => {
-    const out = executor.transformRequest("oc/kimi-k2.6", bodyWith(200), true, CREDENTIALS) as {
+  it("truncates an over-long tools array to MAX_TOOLS_LIMIT entries", () => {
+    const out = executor.transformRequest(
+      "oc/kimi-k2.6",
+      bodyWith(MAX_TOOLS_LIMIT + 44),
+      true,
+      CREDENTIALS
+    ) as {
       tools: unknown[];
     };
-    assert.equal(out.tools.length, 128, "upstream rejects more than 128 tools");
+    assert.equal(
+      out.tools.length,
+      MAX_TOOLS_LIMIT,
+      "the executor caps tools at MAX_TOOLS_LIMIT (fork default: 256, env-overridable)"
+    );
     assert.deepEqual(
-      (out.tools[127] as { function: { name: string } }).function.name,
-      "tool_127",
-      "truncation keeps the first 128 in order, not an arbitrary slice"
+      (out.tools[MAX_TOOLS_LIMIT - 1] as { function: { name: string } }).function.name,
+      `tool_${MAX_TOOLS_LIMIT - 1}`,
+      "truncation keeps the first MAX_TOOLS_LIMIT members in order"
     );
   });
 
