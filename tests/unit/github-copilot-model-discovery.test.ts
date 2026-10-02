@@ -141,6 +141,8 @@ test("curated Copilot allowlist contains the final approved model ids only", () 
       "claude-haiku-4.5",
       "gemini-3.1-pro-preview",
       "gemini-3.5-flash",
+      "gpt-6-astra",
+      "gpt-6.1-sol",
       "gpt-5.6-sol",
       "gpt-5.6-terra",
       "gpt-5.6-luna",

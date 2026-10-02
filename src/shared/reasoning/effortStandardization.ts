@@ -45,14 +45,16 @@ export function extendCodexGpt56EffortValues(
   }
 
   const match = normalizedModel.match(
-    /^gpt-5\.6(?:-(sol|terra|luna))?(?:-(?:none|low|medium|high|xhigh|max|ultra))?$/
+    /^gpt-(?:5\.6(?:-(sol|terra|luna))?|6(?:\.\d+)?-(astra|sol|luna))(?:-(?:none|low|medium|high|xhigh|max|ultra))?$/
   );
   if (!match) return values;
 
   const nativeValues = ["low", "medium", "high", "xhigh", "max"];
-  // Ultra is a Codex-only multi-agent preset on Sol/Terra; the public OpenAI API stops at max.
+  // Ultra is a Codex-only multi-agent preset on Sol/Terra (and GPT-6 Astra/Sol); the
+  // public OpenAI API stops at max.
   const isCodex = normalizedProvider === "codex" || normalizedProvider === "cx";
-  return isCodex && (match[1] === "sol" || match[1] === "terra")
+  const family = match[1] ?? match[2];
+  return isCodex && (family === "sol" || family === "terra" || family === "astra")
     ? [...nativeValues, "ultra"]
     : nativeValues;
 }

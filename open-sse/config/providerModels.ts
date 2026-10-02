@@ -118,15 +118,26 @@ export function findModelName(aliasOrId: string, modelId: string): string {
 
 export function getModelTargetFormat(aliasOrId: string, modelId: string): string | null {
   const models = PROVIDER_MODELS[aliasOrId];
-  const found = models?.find((m) => m.id === modelId);
+  // Strip provider prefix if present: "openai/gpt-6-astra" → "gpt-6-astra"
+  const bareModelId = modelId.includes("/") ? modelId.slice(modelId.lastIndexOf("/") + 1) : modelId;
+  const found = models?.find((m) => m.id === bareModelId);
   if (found?.targetFormat) return found.targetFormat;
+  // Effort suffixes (gpt-6-astra-high, gpt-5.6-sol-xhigh) are not separate
+  // catalog rows on the public OpenAI provider. They must keep the base
+  // model's endpoint, or tools+reasoning land on /v1/chat/completions and
+  // OpenAI returns a 400 that the Responses API would have accepted.
+  const effortStripped = bareModelId.replace(/-(?:ultra|max|xhigh|high|medium|low|none)$/i, "");
+  if (effortStripped !== bareModelId) {
+    const base = models?.find((m) => m.id === effortStripped);
+    if (base?.targetFormat) return base.targetFormat;
+  }
   // #5842: OpenAI "*-pro" reasoning models (o1-pro, gpt-5.x-pro) are only served by
   // the native /v1/responses endpoint — /v1/chat/completions 404s ("only supported
   // in v1/responses"). Curated catalog entries are tagged explicitly; this heuristic
   // covers dynamically-synced ids that post-date the catalog (same spirit as the gh
   // executor's /codex/i routing, 9router#102). Scoped to the openai alias so other
   // providers shipping *-pro ids keep their own endpoint semantics.
-  if (aliasOrId === "openai" && /-pro$/i.test(modelId)) return "openai-responses";
+  if (aliasOrId === "openai" && /-pro$/i.test(bareModelId)) return "openai-responses";
   return null;
 }
 

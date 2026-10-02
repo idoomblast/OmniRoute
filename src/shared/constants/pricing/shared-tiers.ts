@@ -1,6 +1,36 @@
 /**
  * Pricing data — shared per-MTok tier constants (god-file decomposition). Pure data; merged by the barrel.
  */
+// OpenAI API Standard; Codex Standard has the same dollar-equivalent rates.
+// https://openai.com/index/gpt-6-astra/
+export const GPT_6_ASTRA_PRICING = {
+  input: 10.0,
+  output: 50.0,
+  cached: 1.0,
+  reasoning: 50.0,
+  cache_creation: 12.5,
+};
+
+// GPT-6 Sol: Codex Standard 50 / 5 / 250 credits per MTok at 25 credits/USD.
+// Shared by the Codex and OpenAI alias rows until OpenAI publishes a distinct
+// public-API rate.
+export const GPT_6_SOL_PRICING = {
+  input: 2.0,
+  output: 10.0,
+  cached: 0.2,
+  reasoning: 10.0,
+  cache_creation: 2.5,
+};
+
+// GPT-6 Luna: Codex Standard 2.5 / 0.25 / 12.5 credits per MTok.
+export const GPT_6_LUNA_PRICING = {
+  input: 0.1,
+  output: 0.5,
+  cached: 0.01,
+  reasoning: 0.5,
+  cache_creation: 0.125,
+};
+
 export const GPT_5_3_CODEX_PRICING = {
   input: 5.0,
   output: 20.0,

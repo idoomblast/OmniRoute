@@ -452,7 +452,11 @@ export async function parseUpstreamError(response: Response, provider: string | 
       const { error: clinepassEnvError } = unwrapClinepassEnvelope(json, provider);
       message = clinepassEnvError
         ? clinepassEnvError.message
-        : json.error?.message || json.message || json.error || text;
+        : json.error?.message ||
+          json.message ||
+          (typeof json.detail === "string" ? json.detail : null) ||
+          json.error ||
+          text;
       errorCode = json.error?.code || json.code;
       errorType = json.error?.type || json.type;
     } catch {

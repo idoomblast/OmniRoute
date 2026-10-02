@@ -3,6 +3,9 @@
  * Pure data; merged by default-pricing.ts via spread (god-file decomposition; semantic split).
  */
 import {
+  GPT_6_ASTRA_PRICING,
+  GPT_6_LUNA_PRICING,
+  GPT_6_SOL_PRICING,
   CLAUDE_OPUS_5_PRICING,
   GPT_5_3_CODEX_PRICING,
   GPT_5_5_PRICING,
@@ -10,6 +13,17 @@ import {
   GPT_5_6_SOL_PRICING,
   GPT_5_6_TERRA_PRICING,
 } from "./shared-tiers";
+
+// Codex Standard: 250 / 25 / 1250 credits per MTok, at 25 credits per USD.
+// https://developers.openai.com/codex/pricing
+const GPT_6_ASTRA_CODEX_PRICING = GPT_6_ASTRA_PRICING;
+// GPT-6.1 Sol: 50 / 2.5 / 250 Standard credits per MTok, at 25 credits/USD.
+// Codex's credit card does not specify a separate cache-write rate.
+const GPT_6_1_SOL_CODEX_PRICING = { input: 2, output: 10, cached: 0.1, reasoning: 10 };
+// Codex Standard: Sol 50 / 5 / 250 and Luna 2.5 / 0.25 / 12.5 credits per MTok.
+// Shared with the OpenAI alias rows via shared-tiers.
+const GPT_6_SOL_CODEX_PRICING = GPT_6_SOL_PRICING;
+const GPT_6_LUNA_CODEX_PRICING = GPT_6_LUNA_PRICING;
 
 export const DEFAULT_PRICING_OAUTH = {
   cc: {
@@ -79,6 +93,33 @@ export const DEFAULT_PRICING_OAUTH = {
     },
   },
   cx: {
+    "gpt-6.1-sol": GPT_6_1_SOL_CODEX_PRICING,
+    "gpt-6.1-sol-ultra": GPT_6_1_SOL_CODEX_PRICING,
+    "gpt-6.1-sol-max": GPT_6_1_SOL_CODEX_PRICING,
+    "gpt-6.1-sol-xhigh": GPT_6_1_SOL_CODEX_PRICING,
+    "gpt-6.1-sol-high": GPT_6_1_SOL_CODEX_PRICING,
+    "gpt-6.1-sol-medium": GPT_6_1_SOL_CODEX_PRICING,
+    "gpt-6.1-sol-low": GPT_6_1_SOL_CODEX_PRICING,
+    "gpt-6-astra": GPT_6_ASTRA_CODEX_PRICING,
+    "gpt-6-astra-ultra": GPT_6_ASTRA_CODEX_PRICING,
+    "gpt-6-astra-max": GPT_6_ASTRA_CODEX_PRICING,
+    "gpt-6-astra-xhigh": GPT_6_ASTRA_CODEX_PRICING,
+    "gpt-6-astra-high": GPT_6_ASTRA_CODEX_PRICING,
+    "gpt-6-astra-medium": GPT_6_ASTRA_CODEX_PRICING,
+    "gpt-6-astra-low": GPT_6_ASTRA_CODEX_PRICING,
+    "gpt-6-sol": GPT_6_SOL_CODEX_PRICING,
+    "gpt-6-sol-ultra": GPT_6_SOL_CODEX_PRICING,
+    "gpt-6-sol-max": GPT_6_SOL_CODEX_PRICING,
+    "gpt-6-sol-xhigh": GPT_6_SOL_CODEX_PRICING,
+    "gpt-6-sol-high": GPT_6_SOL_CODEX_PRICING,
+    "gpt-6-sol-medium": GPT_6_SOL_CODEX_PRICING,
+    "gpt-6-sol-low": GPT_6_SOL_CODEX_PRICING,
+    "gpt-6-luna": GPT_6_LUNA_CODEX_PRICING,
+    "gpt-6-luna-max": GPT_6_LUNA_CODEX_PRICING,
+    "gpt-6-luna-xhigh": GPT_6_LUNA_CODEX_PRICING,
+    "gpt-6-luna-high": GPT_6_LUNA_CODEX_PRICING,
+    "gpt-6-luna-medium": GPT_6_LUNA_CODEX_PRICING,
+    "gpt-6-luna-low": GPT_6_LUNA_CODEX_PRICING,
     "codex-auto-review": GPT_5_5_PRICING,
     // Codex uses credits per 1M tokens. OmniRoute stores the dollar-equivalent
     // values below at the documented conversion of 25 credits per USD.

@@ -49,15 +49,15 @@ export function imageUrlToText(value: unknown): string {
   return toString(record.url);
 }
 
-const CODEX_GPT_5_6_MODEL_PATTERN =
-  /^gpt-5\.6(?:-(?:sol|terra|luna))?(?:-(?:none|low|medium|high|xhigh|max|ultra))?$/;
+const CODEX_MAX_EFFORT_MODEL_PATTERN =
+  /^(?:gpt-5\.6(?:-(?:sol|terra|luna))?|gpt-6(?:\.\d+)?-(?:astra|sol|luna))(?:-(?:none|low|medium|high|xhigh|max|ultra))?$/;
 
 function supportsNativeMaxReasoningEffort(model: unknown): boolean {
   const normalizedModel = toString(model)
     .trim()
     .toLowerCase()
     .replace(/^(?:openai|codex|cx)\//, "");
-  return CODEX_GPT_5_6_MODEL_PATTERN.test(normalizedModel);
+  return CODEX_MAX_EFFORT_MODEL_PATTERN.test(normalizedModel);
 }
 
 export function normalizeResponsesReasoningEffort(value: unknown, model?: unknown): string {

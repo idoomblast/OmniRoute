@@ -3,11 +3,28 @@
 import { PROVIDER_CLAUDE } from "../../services/systemTransforms.ts";
 import { isClaudeCodeCompatible } from "../../services/provider.ts";
 import {
+  getProviderModels,
   getSupportedThinkingEfforts,
   supportsClaudeMaxEffort,
   supportsXHighEffort,
 } from "../../config/providerModels.ts";
 import { getRegistryEntry } from "../../config/providerRegistry.ts";
+
+/**
+ * Canonical ranking of the reasoning-effort vocabulary (mirrors the catalog's
+ * `CANONICAL_EFFORT_VALUES` plus Codex's provider-native `ultra`). Used to clamp a
+ * requested effort onto a model's declared `supportedThinkingEfforts`.
+ */
+const REASONING_EFFORT_ORDER: readonly string[] = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "ultra",
+];
 
 /**
  * Sanitize reasoning_effort for providers that don't accept all values.
@@ -162,19 +179,19 @@ export function supportsMaxEffortForProvider(provider: string, model: string): b
   const isOllamaCloud = provider === "ollama-cloud";
   const isMoonshotK3 =
     (provider === "moonshot" || provider === "kimi") && /^kimi-k3(?:$|-)/i.test(model);
-  // GPT-5.6 (Codex OAuth + public OpenAI API /v1/responses) natively accepts literal
-  // max. Model-scoped to the GPT-5.6 family (bare `gpt-5.6`, -sol/-terra/-luna, and
-  // their -max/-ultra alias forms) — GPT-5.5 and earlier top at xhigh and must keep
-  // normalizing max → xhigh.
-  const isGpt56NativeMax =
+  // GPT-5.6/GPT-6 (Codex OAuth + public OpenAI API /v1/responses) natively accept
+  // literal max. Model-scoped to the GPT-5.6 and GPT-6 families (bare `gpt-5.6`,
+  // -sol/-terra/-luna, gpt-6(.1) -astra/-sol/-luna, and their -max/-ultra alias
+  // forms) — GPT-5.5 and earlier top at xhigh and must keep normalizing max → xhigh.
+  const isGptNativeMax =
     (provider === "openai" || provider === "codex") &&
-    /^gpt-5\.6(?:-(?:sol|terra|luna))?(?:-(?:none|low|medium|high|xhigh|max|ultra))?$/i.test(
+    /^(?:gpt-5\.6(?:-(?:sol|terra|luna))?|gpt-6(?:\.\d+)?-(?:astra|sol|luna))(?:-(?:none|low|medium|high|xhigh|max|ultra))?$/i.test(
       model
         .trim()
         .toLowerCase()
         .replace(/^(?:openai|codex|cx)\//, "")
     );
-  return isClaude || isOpencodeGoDeepSeek || isOllamaCloud || isMoonshotK3 || isGpt56NativeMax;
+  return isClaude || isOpencodeGoDeepSeek || isOllamaCloud || isMoonshotK3 || isGptNativeMax;
 }
 
 // ── Effort carrier helpers (#7044) ──────────────────────────────────────────
@@ -271,7 +288,7 @@ export function sanitizeReasoningEffortForProvider(
   if (c.effort === undefined) {
     if (!isStrictReasoningModel(provider, modelStr)) return body;
     // Providers with their own literal-max contract (opencode-go DeepSeek,
-    // ollama-cloud, moonshot kimi-k3, gpt-5.6) — a global strict enum must not
+    // ollama-cloud, moonshot kimi-k3, gpt-5.6/gpt-6) — a global strict enum must not
     // force-inject `high` into their request shape; they already handle the
     // no-effort case natively or via their executor.
     if (supportsMaxEffortForProvider(provider, modelStr)) return body;
@@ -326,7 +343,7 @@ export function sanitizeReasoningEffortForProvider(
 
   if (isStrictReasoningModel(provider, modelStr)) {
     // Providers with their own literal-max contract for this model (opencode-go
-    // DeepSeek variants, ollama-cloud, moonshot kimi-k3, gpt-5.6) accept the full
+    // DeepSeek variants, ollama-cloud, moonshot kimi-k3, gpt-5.6/gpt-6) accept the full
     // low|medium|high|max vocabulary natively — the global strict enum (low|high|
     // max) must not clamp their `medium` down to `high`. Their supportsMax opt-in
     // is the more specific contract and wins over MODEL_SPECS.
@@ -354,6 +371,34 @@ export function sanitizeReasoningEffortForProvider(
       `${provider}/${modelStr}: removed unsupported reasoning_effort`
     );
     return stripEffortValue(b, c);
+  }
+
+  // ── explicit per-model capability clamp ──────────────────────────────────
+  // When the registry declares supportedThinkingEfforts for this exact model
+  // and the requested effort falls outside that vocabulary, remap to the
+  // nearest declared tier: the smallest ranked value ≥ the request, else the
+  // highest declared (a request above the ceiling lands on the ceiling).
+  const providerModelIdForClamp = modelStr.startsWith(`${provider}/`)
+    ? modelStr.slice(provider.length + 1)
+    : modelStr;
+  const declaredEfforts = getProviderModels(provider).find(
+    (entry) =>
+      entry.id === providerModelIdForClamp || entry.aliases?.includes(providerModelIdForClamp)
+  )?.supportedThinkingEfforts;
+  const declaredRanked = (Array.isArray(declaredEfforts) ? declaredEfforts : [])
+    .map((tier) => ({ tier, rank: REASONING_EFFORT_ORDER.indexOf(tier) }))
+    .filter((x) => x.rank >= 0)
+    .sort((a, b) => a.rank - b.rank);
+  if (declaredRanked.length > 0 && !declaredEfforts!.includes(effortStr)) {
+    const requestedRank = REASONING_EFFORT_ORDER.indexOf(effortStr);
+    const nearest =
+      declaredRanked.find((x) => x.rank >= requestedRank) ??
+      declaredRanked[declaredRanked.length - 1];
+    log?.info?.(
+      "REASONING_SANITIZE",
+      `${provider}/${modelStr}: mapped reasoning_effort ${effortStr} → ${nearest.tier} (model accepts ${declaredEfforts!.join("/")})`
+    );
+    return writeEffortValue(b, nearest.tier, c);
   }
 
   const supportsXHigh = supportsXHighEffort(provider, modelStr);

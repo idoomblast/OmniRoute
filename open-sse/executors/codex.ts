@@ -123,8 +123,29 @@ export { getCodexModelScope, getCodexRateLimitKey, type CodexQuotaScope };
 const EFFORT_ORDER = ["none", "low", "medium", "high", "xhigh", "max", "ultra"] as const;
 type EffortLevel = (typeof EFFORT_ORDER)[number];
 const STANDARD_EFFORT_SUFFIXES = ["none", "low", "medium", "high", "xhigh"] as const;
-const GPT_5_6_MAX_ALIAS_MODELS = new Set(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]);
-const GPT_5_6_ULTRA_ALIAS_MODELS = new Set(["gpt-5.6-sol", "gpt-5.6-terra"]);
+const CODEX_MAX_ALIAS_MODELS = new Set([
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+  "gpt-6-astra",
+  "gpt-6-sol",
+  "gpt-6-luna",
+  "gpt-6.1-sol",
+]);
+const CODEX_ULTRA_ALIAS_MODELS = new Set([
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-6-astra",
+  "gpt-6-sol",
+  "gpt-6.1-sol",
+]);
+
+/** Highest effort a max/ultra-tier base model accepts, or null for other models. */
+function getCodexAliasEffortCap(model: string): EffortLevel | null {
+  if (CODEX_ULTRA_ALIAS_MODELS.has(model)) return "ultra";
+  if (CODEX_MAX_ALIAS_MODELS.has(model)) return "max";
+  return null;
+}
 const CODEX_FAST_WIRE_VALUE = "priority";
 const CODEX_RESPONSES_WS_URL = "wss://chatgpt.com/backend-api/codex/responses";
 const CODEX_RESPONSES_LITE_HEADER = "x-openai-internal-codex-responses-lite";
@@ -156,13 +177,13 @@ function isCodexResponsesLiteRequest(
   );
 }
 
-// GPT-5.6 ultra-tier (sol/terra at "ultra") and luna at "max" coordinate delegation to
+// Astra/Sol/Terra at "ultra" and Luna at "max" coordinate delegation to
 // sub-agents via parallel tool calls (see the effort-clamp comment near clampEffort()).
 // Responses Lite must not strip parallel_tool_calls for those model/effort combos, or
 // delegation silently breaks while the request still returns HTTP 200 (issue #7821).
 function isCodexDelegationDependentModel(model: unknown): boolean {
   const { baseModel, effort } = splitCodexReasoningSuffix(model);
-  if (effort === "ultra" && GPT_5_6_ULTRA_ALIAS_MODELS.has(baseModel)) return true;
+  if (effort === "ultra" && CODEX_ULTRA_ALIAS_MODELS.has(baseModel)) return true;
   if (effort === "max" && baseModel === "gpt-5.6-luna") return true;
   return false;
 }
@@ -192,13 +213,17 @@ function splitCodexReasoningSuffix(model: unknown): {
   effort: EffortLevel | null;
 } {
   const modelId = typeof model === "string" ? model : "";
-  const gpt56AliasMatch = /^(gpt-5\.6-(?:sol|terra|luna))-(max|ultra)$/.exec(modelId);
-  if (gpt56AliasMatch) {
-    const [, baseModel, alias] = gpt56AliasMatch;
-    const supportedModels =
-      alias === "ultra" ? GPT_5_6_ULTRA_ALIAS_MODELS : GPT_5_6_MAX_ALIAS_MODELS;
+  const maxTierMatch = /^(.+?)(?:-(max|ultra)|\((max|ultra)\))$/.exec(modelId);
+  if (maxTierMatch) {
+    const [, baseModel, hyphenEffort, parenthesizedEffort] = maxTierMatch;
+    const effort = hyphenEffort ?? parenthesizedEffort;
+    const supportedModels = parenthesizedEffort
+      ? CODEX_MAX_ALIAS_MODELS
+      : effort === "ultra"
+        ? CODEX_ULTRA_ALIAS_MODELS
+        : CODEX_MAX_ALIAS_MODELS;
     if (supportedModels.has(baseModel)) {
-      return { baseModel, effort: alias as EffortLevel };
+      return { baseModel, effort: effort as EffortLevel };
     }
   }
 
@@ -412,15 +437,12 @@ function normalizeServiceTierValue(value: unknown): string | undefined {
 }
 
 /**
- * Maximum reasoning effort allowed per Codex model.
- * Models not listed here retain the legacy xhigh cap.
- * Update this table when Codex releases new models with different caps.
+ * Maximum reasoning effort per Codex model. Max/ultra-tier models come from the alias
+ * sets above; everything else unlisted keeps the xhigh cap. Update this table when
+ * Codex releases new models with different caps.
  */
 const MAX_EFFORT_BY_MODEL: Record<string, EffortLevel> = {
   "gpt-5.6": "max",
-  "gpt-5.6-sol": "ultra",
-  "gpt-5.6-terra": "ultra",
-  "gpt-5.6-luna": "max",
   "gpt-5.3-codex": "xhigh",
   "gpt-5.1-codex-max": "xhigh",
   "gpt-5-mini": "high",
@@ -433,7 +455,7 @@ const MAX_EFFORT_BY_MODEL: Record<string, EffortLevel> = {
  * Returns the original value if within limits, or the cap if it exceeds it.
  */
 function clampEffort(model: string, requested: string): string {
-  const max: EffortLevel = MAX_EFFORT_BY_MODEL[model] ?? "xhigh";
+  const max: EffortLevel = MAX_EFFORT_BY_MODEL[model] ?? getCodexAliasEffortCap(model) ?? "xhigh";
   const reqIdx = EFFORT_ORDER.indexOf(requested as EffortLevel);
   const maxIdx = EFFORT_ORDER.indexOf(max);
   if (reqIdx > maxIdx) {
@@ -1439,7 +1461,7 @@ export class CodexExecutor extends BaseExecutor {
     const explicitReasoning = normalizeEffortValue(reasoningRecord?.effort);
     const requestReasoningEffort = normalizeEffortValue(body.reasoning_effort);
     const fallbackReasoningEffort = allowConnectionReasoningDefaults
-      ? requestDefaults.reasoningEffort || "medium"
+      ? requestDefaults.reasoningEffort || (cleanModel === "gpt-6.1-sol" ? "low" : "medium")
       : undefined;
     // Issue #2331: model suffix aliases (for example gpt-5.5-xhigh) represent an
     // explicit model selection, so they must override client-injected defaults such
