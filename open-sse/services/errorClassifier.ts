@@ -154,6 +154,24 @@ function shouldPreserveQuotaSignalsFor429(provider?: string | null): boolean {
   return getProviderCategory(provider) === "oauth";
 }
 
+// OpenCode Zen free-tier refusal. Mirrors isOpencodeFreeTierRefusal in
+// open-sse/executors/opencodeGeoBlock.ts, which must stay a leaf module (no
+// imports) while this file pulls the registry and the DB. The parity test pins
+// both to one vector table. Only the relayed sentence is reachable here:
+// parseUpstreamError hands the classifier `error.message` and keeps `error.type`
+// aside, so matching the machine token alone would never fire. The token stays
+// in the list for callers that pass the whole body.
+const FREE_TIER_REFUSAL_SIGNALS = ["freetiererror", "free tier can only be used"];
+
+function isOpencodeFreeTierProvider(provider?: string | null): boolean {
+  return (provider || "").toLowerCase().startsWith("opencode");
+}
+
+function isFreeTierClientRefusal(bodyStr: string): boolean {
+  const lower = bodyStr.toLowerCase();
+  return FREE_TIER_REFUSAL_SIGNALS.some((signal) => lower.includes(signal));
+}
+
 export function classifyProviderError(
   statusCode: number,
   responseBody: unknown,
@@ -243,6 +261,17 @@ export function classifyProviderError(
       /\bit is disabled\b/i.test(bodyStr) ||
       isCloudCodeProvider;
     if (recoverableProject403) {
+      return PROVIDER_ERROR_TYPES.PROJECT_ROUTE_ERROR;
+    }
+    // The free tier refuses the REQUEST (client identity or request shape), not the
+    // account: the same credential succeeds on a compliant request, and every
+    // sibling account gets the same verdict. FORBIDDEN would ban the connection
+    // permanently and GEO_BLOCKED would park a healthy account for 24h, so neither
+    // fits. PROJECT_ROUTE_ERROR records the refusal (lastErrorType/lastError/
+    // errorCode) and explicitly does not ban — matching how a recoverable
+    // project-config 403 is handled above. Must precede the apikey short-circuit
+    // below, which would otherwise drop this refusal as unclassified.
+    if (isOpencodeFreeTierProvider(provider) && isFreeTierClientRefusal(bodyStr)) {
       return PROVIDER_ERROR_TYPES.PROJECT_ROUTE_ERROR;
     }
     if (provider && getProviderCategory(provider) === "apikey") {

@@ -40,6 +40,8 @@ import {
   recordModelLockoutFailure,
 } from "@omniroute/open-sse/services/accountFallback.ts";
 import { isLocalProvider } from "@omniroute/open-sse/config/providerRegistry.ts";
+import { isOpencodeFreeTierRefusalForProvider } from "@omniroute/open-sse/executors/opencodeGeoBlock.ts";
+import { isOpencodeFreeTierSkipped } from "@omniroute/open-sse/services/opencodeFreeTierSkip.ts";
 import { COOLDOWN_MS, RateLimitReason } from "@omniroute/open-sse/config/constants.ts";
 import {
   preflightQuota,
@@ -391,9 +393,21 @@ function resolveTerminalConnectionStatus(
   status: number,
   result: { permanent?: boolean; creditsExhausted?: boolean },
   providerErrorType: string | null = null,
-  provider: string | null = null
+  provider: string | null = null,
+  isPerModelQuotaProvider = false
 ): string | null {
-  if (result.creditsExhausted || status === 402) return "credits_exhausted";
+  // #12242 (402 variant of #3027): a bare 402 on a passthrough/gateway
+  // provider that multiplexes many models behind one credential is a
+  // PER-MODEL billing signal, not proof the credential itself is dead —
+  // free/sibling models on the same connection remain perfectly usable.
+  // Only terminalize the whole connection for a 402 when the provider is NOT
+  // a per-model-quota provider; the caller then lets it fall through to the
+  // per-model lockout branch instead. `result.creditsExhausted` is a
+  // provider's own explicit classification (independent of HTTP status) and
+  // stays unconditionally terminal.
+  if (result.creditsExhausted || (status === 402 && !isPerModelQuotaProvider)) {
+    return "credits_exhausted";
+  }
   if (
     providerErrorType === PROVIDER_ERROR_TYPES.PROJECT_ROUTE_ERROR ||
     providerErrorType === PROVIDER_ERROR_TYPES.OAUTH_INVALID_TOKEN
@@ -811,6 +825,12 @@ async function maybeSyntheticNoAuthFallback(
 ) {
   if (!providerCanUseSyntheticNoAuthFallback(providerId)) return null;
   if (excludedConnectionIds.has(SYNTHETIC_NOAUTH_CONNECTION_ID)) return null;
+  // #14313: a free-tier refusal just paused this keyless path — do not re-select
+  // the synthetic noauth connection until the short TTL expires.
+  if (isOpencodeFreeTierSkipped(providerId)) {
+    log.info("AUTH", `${providerId} | no-auth fallback skipped (OpenCode free-tier pause)`);
+    return null;
+  }
   // #4954: hydrate per-account proxy/rotation config off the connection row so
   // no-auth executors (opencode, mimocode) actually honor configured proxies.
   const providerSpecificData = await loadNoAuthProviderSpecificData(providerId);
@@ -1944,6 +1964,10 @@ export async function markAccountUnavailable(
       return { shouldFallback: true, cooldownMs: 0 };
     }
 
+    // Request-scoped refusal: nothing about it belongs on this account or this model.
+    if (isOpencodeFreeTierRefusalForProvider(provider, status, errorText))
+      return { shouldFallback: true, cooldownMs: 0 };
+
     // ─── Anti-Thundering Herd Guard ─────────────────────────────────
     // If this connection was ALREADY marked unavailable by a prior concurrent
     // request (within the mutex window), skip re-marking to avoid resetting
@@ -2131,7 +2155,8 @@ export async function markAccountUnavailable(
       status,
       result as { permanent?: boolean; creditsExhausted?: boolean },
       providerErrorType,
-      provider
+      provider,
+      isPerModelQuotaProvider
     );
     const cachedQuotaResetAt =
       providerErrorType === PROVIDER_ERROR_TYPES.QUOTA_EXHAUSTED ||
@@ -2145,13 +2170,28 @@ export async function markAccountUnavailable(
         ? cachedQuotaResetMs - Date.now()
         : rawCooldownMs;
 
-    // ── #3027: per-model subscription/permission 403 → model-only lockout ──
-    if (isPerModelQuotaProvider && status === 403 && provider && model && !terminalStatus) {
+    // ── #3027 / #12242 (402 variant): per-model subscription (403) or
+    // per-model billing (402) error on a passthrough/gateway provider →
+    // model-only lockout, connection stays active. A 402 here is a specific
+    // model needing credit, not a dead credential — sibling (e.g. free)
+    // models on the same connection remain usable and must not be knocked
+    // out. Deliberately excludes single-credential providers, where a 402
+    // genuinely does mean the key is out of credit (see #5239 / #10616) —
+    // isPerModelQuotaProvider is false there, so this branch never fires and
+    // the connection-wide credits_exhausted path above still applies.
+    if (
+      isPerModelQuotaProvider &&
+      (status === 403 || status === 402) &&
+      provider &&
+      model &&
+      !terminalStatus
+    ) {
+      const lockoutReason = status === 402 ? "credits" : "forbidden";
       const lockout = recordModelLockoutFailure(
         provider,
         connectionId,
         model,
-        "forbidden",
+        lockoutReason,
         status,
         fallbackResult.baseCooldownMs ??
           effectiveProviderProfile?.baseCooldownMs ??
@@ -2165,14 +2205,17 @@ export async function markAccountUnavailable(
         }
       );
       updateProviderConnection(connectionId, {
-        lastErrorType: "forbidden",
-        lastError: `Model ${model} forbidden (per-model access/subscription)`,
+        lastErrorType: lockoutReason,
+        lastError:
+          status === 402
+            ? `Model ${model} out of credits (per-model billing)`
+            : `Model ${model} forbidden (per-model access/subscription)`,
         lastErrorAt: new Date().toISOString(),
         errorCode: status,
       }).catch(() => {});
       log.info(
         "AUTH",
-        `Model-only lockout for ${provider}:${model} — 403 forbidden ${Math.ceil(lockout.cooldownMs / 1000)}s (per-model quota provider, connection stays active)`
+        `Model-only lockout for ${provider}:${model} — ${status} ${lockoutReason} ${Math.ceil(lockout.cooldownMs / 1000)}s (per-model quota provider, connection stays active)`
       );
       return { shouldFallback: true, cooldownMs: lockout.cooldownMs };
     }

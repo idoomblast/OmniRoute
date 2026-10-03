@@ -13,6 +13,7 @@ import { isSelfInflictedUpstreamTimeout } from "../../handlers/chatCore/cooldown
 import { isLocalStreamLifecycleError } from "@/shared/utils/circuitBreaker";
 import { CONTEXT_OVERFLOW_PATTERNS, MODEL_ACCESS_DENIED_PATTERNS } from "../accountFallback.ts";
 import { isResourceNotFoundResponse } from "../errorClassifier.ts";
+import { isOpencodeFreeTierRefusal } from "../../executors/opencodeGeoBlock.ts";
 import type { ResolvedComboTarget } from "./types.ts";
 
 // Status codes that should mark round-robin target semaphores as cooling down.
@@ -196,18 +197,34 @@ export function isRequestScopedUpstreamFailure(error?: {
 }): boolean {
   const code = typeof error?.code === "string" ? error.code.toLowerCase() : "";
   const type = typeof error?.type === "string" ? error.type.toLowerCase() : "";
-  return REQUEST_SCOPED_UPSTREAM_ERROR_CODES.has(code) || type === "context_length_exceeded";
+  return (
+    REQUEST_SCOPED_UPSTREAM_ERROR_CODES.has(code) ||
+    type === "context_length_exceeded" ||
+    // #14313: OpenCode free-tier refusal (FreeTierError) — same verdict on every
+    // account for the same request; never a connection/model health signal.
+    type === "freetiererror" ||
+    code === "freetiererror"
+  );
 }
 
-/** Request-scoped classification that also has access to the HTTP body. */
+/**
+ * Request-scoped classification that also has access to the HTTP body.
+ *
+ * Takes the Response itself (the upstream call shape — only its status is
+ * read) or a bare status number: the fork's monolithic combo loop still
+ * carries the status separately rather than the Response object.
+ */
 export function isComboRequestScopedFailure(
-  status: number,
+  responseOrStatus: Response | number,
   errorText: string,
   error?: { code?: string | null; type?: string | null }
 ): boolean {
+  const status = typeof responseOrStatus === "number" ? responseOrStatus : responseOrStatus.status;
   return (
     isRequestScopedUpstreamFailure(error) ||
-    (status === 404 && isResourceNotFoundResponse(errorText))
+    (status === 404 && isResourceNotFoundResponse(errorText)) ||
+    // #14313: body-only free-tier refusals (relayed sentence, no error.type kept).
+    isOpencodeFreeTierRefusal(status, errorText)
   );
 }
 
