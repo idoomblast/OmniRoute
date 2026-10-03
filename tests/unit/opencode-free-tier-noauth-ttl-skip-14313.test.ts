@@ -68,3 +68,13 @@ test("clear resets every active skip", () => {
   clearOpencodeFreeTierSkips();
   assert.equal(isOpencodeFreeTierSkipped("opencode"), false);
 });
+
+test("a skip recorded under one opencode id pauses its siblings (same free-tier upstream)", () => {
+  noteOpencodeFreeTierSkip("opencode-zen");
+  assert.equal(isOpencodeFreeTierSkipped("opencode"), true);
+  assert.equal(isOpencodeFreeTierSkipped("opencode-zen"), true);
+
+  clearOpencodeFreeTierSkips();
+  noteOpencodeFreeTierSkip("opencode");
+  assert.equal(isOpencodeFreeTierSkipped("opencode-zen"), true);
+});

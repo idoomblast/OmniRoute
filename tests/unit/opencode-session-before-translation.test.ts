@@ -67,3 +67,11 @@ test("invalid identities are ignored without inventing an account-scoped session
     "valid"
   );
 });
+
+test("opencode-zen (the `opencode/` alias target) preserves native identity too", () => {
+  const result = buildExecutorClientHeaders({}, undefined, {
+    provider: "opencode-zen",
+    body: { thread_id: "native-zen-conversation" },
+  });
+  assert.equal(result?.["x-opencode-session"], "native-zen-conversation");
+});

@@ -408,7 +408,10 @@ export class OpencodeExecutor extends BaseExecutor {
           if (bodyText !== null && isOpencodeFreeTierRefusal(status, bodyText)) {
             return await handleLoopFreeTierRefusal(
               (retried) => this.finalizeForcedStream(input, retried),
-              input,
+              // Carry the first dispatch's synthesized session into the retry —
+              // re-synthesizing from the merged body would present a different
+              // x-opencode-session than the refused attempt (fast-path parity).
+              prepared,
               result,
               this.freeTierRetryCtx(input),
               { account, masked, proxyKey: proxyKeyOf(account.proxy) ?? "direct" },
@@ -418,7 +421,7 @@ export class OpencodeExecutor extends BaseExecutor {
                 dispatch: (retryInput) =>
                   runWithProxyContext(account.proxy, () =>
                     super.execute({
-                      ...withSynthesizedOpencodeSession(retryInput, this.provider),
+                      ...retryInput,
                       skipUpstreamRetry: true,
                     })
                   ).then((r) => (r instanceof Response ? { response: r } : r)),

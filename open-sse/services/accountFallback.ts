@@ -15,6 +15,7 @@ import {
   isNimFunctionDegraded,
 } from "../config/errorConfig.ts";
 import { getProviderErrorRuleMatch } from "../config/providerErrorRules.ts";
+import { isCreditsExhaustedWithSharedWallet } from "./accountFallback/sharedWalletCredits.ts";
 import * as rot from "./rotationConfig.ts";
 import { getPassthroughProviders, getProviderCategory } from "../config/providerRegistry.ts";
 import {
@@ -327,10 +328,10 @@ export function isAccountDeactivated(errorText: string): boolean {
 
 /**
  * T10: Returns true if response body indicates credits/quota are permanently exhausted.
+ * Shared-wallet 402 bodies (e.g. Grok Build "usage balance exhausted") count too.
  */
 export function isCreditsExhausted(errorText: string): boolean {
-  const lower = String(errorText || "").toLowerCase();
-  return CREDITS_EXHAUSTED_SIGNALS.some((sig) => lower.includes(sig));
+  return isCreditsExhaustedWithSharedWallet(errorText, CREDITS_EXHAUSTED_SIGNALS);
 }
 
 /**
@@ -1625,7 +1626,11 @@ export function checkFallbackError(
       !errorStr.toLowerCase().includes("hour quota") &&
       !errorStr.toLowerCase().includes("quota has been exceeded")
     ) {
-      return resolveApiKeyForbiddenFallback(errorStr, buildRetryableFallback, RateLimitReason.AUTH_ERROR);
+      return resolveApiKeyForbiddenFallback(
+        errorStr,
+        buildRetryableFallback,
+        RateLimitReason.AUTH_ERROR
+      );
     }
   }
 

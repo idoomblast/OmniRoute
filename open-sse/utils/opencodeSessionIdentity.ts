@@ -72,7 +72,15 @@ export function preserveOpencodeSessionIdentity(
   headers: Record<string, string>,
   request?: { provider?: string; body?: unknown }
 ): void {
-  if (request?.provider !== "opencode" && request?.provider !== "opencode-go") return;
+  // `opencode-zen` is the alias target of `opencode/` in this fork — the id
+  // users actually hit — so it must preserve native identity too.
+  if (
+    request?.provider !== "opencode" &&
+    request?.provider !== "opencode-go" &&
+    request?.provider !== "opencode-zen"
+  ) {
+    return;
+  }
   const sessionId = resolveOpencodeSessionIdentity(headers, request.body);
   if (sessionId) headers["x-opencode-session"] = sessionId;
 }

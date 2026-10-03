@@ -166,6 +166,55 @@ describe("OpencodeExecutor free-tier refusal", () => {
     assert.strictEqual(accountsOf(exec)[0].consecutiveFails, 2);
   });
 
+  // The refusal retry must reuse the first dispatch's synthesized session —
+  // re-synthesizing from the merged body would present a different
+  // x-opencode-session than the refused attempt (loop path = fast-path parity).
+  it("the loop refusal retry keeps the first dispatch's synthesized session", async () => {
+    // The contract appends resolved placeholders (configured wins) to the first
+    // dispatch, so make the observed names differ from the configured ones —
+    // otherwise the retry would add nothing and never fire.
+    const prevPlaceholders = process.env.OPENCODE_FREE_TIER_PLACEHOLDER_TOOLS;
+    process.env.OPENCODE_FREE_TIER_PLACEHOLDER_TOOLS = "bash";
+    try {
+      const exec = new OpencodeExecutor("opencode-zen");
+      const creds = credentialsFor(3);
+      await warmUp(exec, creds);
+      // warmUp's success records the run's own tool names under the synthesized
+      // session; clear them so the session-scoped lookup cannot short-circuit
+      // the merge with names the body already carries.
+      _resetToolObservationForTests();
+      recordAcceptedToolNames("opencode-zen", "muse-spark-1.3-contributor-free", undefined, [
+        "edit",
+      ]);
+      const sessions: Array<string | null> = [];
+      const plan = [{ status: 403, body: REFUSAL_BODY }, { status: 200 }];
+      let call = 0;
+      globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        sessions.push(new Headers(init?.headers as HeadersInit).get("x-opencode-session"));
+        const step = plan[Math.min(call, plan.length - 1)];
+        call++;
+        return new Response(step.body ?? JSON.stringify({ ok: true }), {
+          status: step.status,
+          headers: { "Content-Type": "application/json" },
+        });
+      }) as typeof globalThis.fetch;
+
+      const response = await run(exec, creds);
+
+      assert.strictEqual(response.status, 200, "the refusal retry succeeded");
+      assert.strictEqual(sessions.length, 2, "exactly one retry dispatch");
+      assert.ok(sessions[0], "the first dispatch carries a synthesized session");
+      assert.strictEqual(sessions[1], sessions[0], "the retry reuses the same session");
+      await response.body?.cancel();
+    } finally {
+      if (prevPlaceholders === undefined) {
+        delete process.env.OPENCODE_FREE_TIER_PLACEHOLDER_TOOLS;
+      } else {
+        process.env.OPENCODE_FREE_TIER_PLACEHOLDER_TOOLS = prevPlaceholders;
+      }
+    }
+  });
+
   it("a 400 carrying a real upstream error no longer marks the account successful", async () => {
     const exec = new OpencodeExecutor("opencode-zen");
     const creds = credentialsFor(2);
