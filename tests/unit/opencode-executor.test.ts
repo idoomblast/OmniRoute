@@ -36,6 +36,7 @@ describe("OpencodeExecutor", () => {
   let originalFetch;
   let originalZenModels;
   let originalGoModels;
+  let originalSynthesizeCliHeaders;
 
   beforeEach(() => {
     zenExecutor = new OpencodeExecutor("opencode-zen");
@@ -44,6 +45,15 @@ describe("OpencodeExecutor", () => {
     originalFetch = globalThis.fetch;
     originalZenModels = [...(PROVIDER_MODELS["opencode-zen"] || [])];
     originalGoModels = [...(PROVIDER_MODELS["opencode-go"] || [])];
+    // This suite characterizes header/URL-building behavior that predates PR #10571's
+    // CLI-identity synthesis default flip. #10571 turned synthesis ON by default, which
+    // would fabricate User-Agent / x-opencode-* values these tests deliberately assert are
+    // ABSENT (forward-only contract). Pin the flag off here so this suite keeps
+    // characterizing the forward-only path; the on-by-default synthesis path itself is
+    // covered by tests/unit/opencode-cli-headers-synthesis-5997.test.ts and
+    // tests/unit/opencode-session-fingerprint-headers-10571.test.ts.
+    originalSynthesizeCliHeaders = process.env.OPENCODE_SYNTHESIZE_CLI_HEADERS;
+    process.env.OPENCODE_SYNTHESIZE_CLI_HEADERS = "false";
     globalThis.fetch = (async (url, options) => {
       fetchCalls.push({ url, options });
       return createMockResponse();
@@ -54,6 +64,11 @@ describe("OpencodeExecutor", () => {
     globalThis.fetch = originalFetch;
     PROVIDER_MODELS["opencode-zen"] = originalZenModels;
     PROVIDER_MODELS["opencode-go"] = originalGoModels;
+    if (originalSynthesizeCliHeaders === undefined) {
+      delete process.env.OPENCODE_SYNTHESIZE_CLI_HEADERS;
+    } else {
+      process.env.OPENCODE_SYNTHESIZE_CLI_HEADERS = originalSynthesizeCliHeaders;
+    }
   });
 
   describe("execute", () => {
@@ -205,7 +220,10 @@ describe("OpencodeExecutor", () => {
     });
 
     it("omits accept header when stream is false", async () => {
-      const result = await zenExecutor.execute(createInput("big-pickle", false));
+      // A paid model carries the client's non-streaming expectation through. A free-tier
+      // model does not: the gated tier only answers streamed requests, so the executor
+      // announces the event stream and the JSON body is rebuilt from it.
+      const result = await zenExecutor.execute(createInput("gpt-5.4-pro", false));
 
       assert.equal(result.headers.Authorization, "Bearer test-key");
       assert.equal(result.headers["Content-Type"], "application/json");
@@ -213,6 +231,12 @@ describe("OpencodeExecutor", () => {
       // Synthesized session id (Console Go contract) is still injected.
       assert.ok(result.headers["x-opencode-session"]);
       assert.deepEqual(fetchCalls[0].options.headers, result.headers);
+    });
+
+    it("announces the event stream for a free-tier model even when the client wants JSON", async () => {
+      const result = await zenExecutor.execute(createInput("big-pickle", false));
+
+      assert.equal(result.headers["Accept"], "text/event-stream");
     });
 
     it("omits authorization when credentials are missing", async () => {

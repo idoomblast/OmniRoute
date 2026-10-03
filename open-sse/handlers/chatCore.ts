@@ -173,6 +173,8 @@ import {
   PROVIDER_ERROR_TYPES,
   isEmptyContentResponse,
 } from "../services/errorClassifier.ts";
+import { isOpencodeFreeTierRefusalForProvider } from "../executors/opencodeGeoBlock.ts";
+import { noteOpencodeFreeTierSkip } from "../services/opencodeFreeTierSkip.ts";
 import { updateProviderConnection, getProviderConnectionById } from "@/lib/db/providers";
 import { wasRefreshTokenRotated } from "@omniroute/open-sse/services/refreshSerializer.ts";
 import { connectionHasExtraKeys } from "../services/apiKeyRotator.ts";
@@ -417,6 +419,8 @@ export async function handleChatCore({
   modelPinned = false,
 }) {
   let { provider, model, extendedContext } = modelInfo;
+  const getExecutorClientHeaders = () =>
+    buildExecutorClientHeaders(clientRawRequest?.headers, userAgent, { provider, body });
   // ── Memory pressure guard ────────────────────────────────────────────
   // Reject early if V8 heap is already near the 256MB limit. Prevents
   // cascading OOM when many large-context requests arrive concurrently.
@@ -2767,10 +2771,7 @@ export async function handleChatCore({
                           log,
                           extendedContext,
                           upstreamExtraHeaders: buildUpstreamHeadersForExecute(modelToCall),
-                          clientHeaders: buildExecutorClientHeaders(
-                            clientRawRequest?.headers,
-                            userAgent
-                          ),
+                          clientHeaders: getExecutorClientHeaders(),
                           clientResponseFormat,
                           onCredentialsRefreshed,
                           skipUpstreamRetry,
@@ -2994,10 +2995,7 @@ export async function handleChatCore({
                               log,
                               extendedContext,
                               upstreamExtraHeaders: buildUpstreamHeadersForExecute(modelToCall),
-                              clientHeaders: buildExecutorClientHeaders(
-                                clientRawRequest?.headers,
-                                userAgent
-                              ),
+                              clientHeaders: getExecutorClientHeaders(),
                               clientResponseFormat,
                               onCredentialsRefreshed,
                               skipUpstreamRetry,
@@ -3507,7 +3505,7 @@ export async function handleChatCore({
             log,
             extendedContext,
             upstreamExtraHeaders: buildUpstreamHeadersForExecute(retryModelId),
-            clientHeaders: buildExecutorClientHeaders(clientRawRequest?.headers, userAgent),
+            clientHeaders: getExecutorClientHeaders(),
             clientResponseFormat,
             onCredentialsRefreshed,
             skipUpstreamRetry: isCombo,
@@ -3759,6 +3757,14 @@ export async function handleChatCore({
           console.warn(
             `[provider] Node ${errorConnectionId} project routing error (${statusCode}) — not banning`
           );
+          // #14313: free-tier refusal on the keyless path — record a short TTL
+          // skip so auto-combo / noauth fallback stop re-picking it immediately.
+          if (
+            errorConnectionId === "noauth" &&
+            isOpencodeFreeTierRefusalForProvider(provider, statusCode, message)
+          ) {
+            noteOpencodeFreeTierSkip(provider);
+          }
         } else if (errorType === PROVIDER_ERROR_TYPES.MODEL_NOT_FOUND) {
           // 404 — model/endpoint does not exist upstream. Lock the model so the
           // retry/backoff loop stops hammering the dead endpoint (which would

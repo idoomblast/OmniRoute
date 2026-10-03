@@ -7,8 +7,34 @@ import {
   isThinkingMessageModel,
 } from "../utils/reasoningContentInjector.ts";
 import { runWithProxyContext } from "../utils/proxyFetch.ts";
-import { findHeader, forwardOpencodeClientHeaders } from "../utils/opencodeHeaders.ts";
+import {
+  clientSuppliedOpencodeSession,
+  findHeader,
+  forwardOpencodeClientHeaders,
+  resolveOpencodeCliDefaults,
+} from "../utils/opencodeHeaders.ts";
+import { projectOpencodeSessionBody } from "../utils/opencodeSessionIdentity.ts";
 import { generateSessionId } from "../services/sessionManager.ts";
+import { currentRequestContext, runInRequestContext } from "./opencodeRequestContext.ts";
+import {
+  attemptFor,
+  isGatedFreeTierRequest,
+  isPremiumOpencodeModel,
+  noteFreeTierOutcome,
+  prepareFreeTierRequest,
+  rebuildJsonFromForcedStream,
+  surfaceFromBaseUrl,
+} from "./opencodeFreeTierContract.ts";
+import {
+  handleLoopFreeTierRefusal,
+  retryFreeTierRefusalWithObservedTools,
+} from "./opencodeFreeTierRetry.ts";
+import { withRequestShapeRetry } from "./opencodeRequestShape.ts";
+import { isOpencodeFreeTierRefusal, proxyKeyOf } from "./opencodeGeoBlock.ts";
+
+// Re-exported: the free-model catalog moved to the contract module (it decides whether the
+// contract applies), and existing importers keep resolving it from the executor.
+export { isPremiumOpencodeModel };
 
 /**
  * Per-account proxy configuration, persisted by NoAuthAccountCard under
@@ -138,8 +164,55 @@ export function withSynthesizedOpencodeSession(
   };
 }
 
+/** Registry target format for a model, defaulting to the openai surface. */
+export function resolveOpencodeTargetFormat(provider: string, model: string): string {
+  return getModelTargetFormat(provider, model) || "openai";
+}
+
 export class OpencodeExecutor extends BaseExecutor {
-  _requestFormat: string | null = null;
+  /**
+   * The target format and the client session of the request being served. While `execute()`
+   * runs they live in that request's own context (this instance is shared and requests
+   * overlap); outside it they fall back to plain fields, which is how `buildHeaders`,
+   * `buildUrl` and `transformRequest` are exercised on their own.
+   */
+  private _formatFallback: string | null = null;
+  private _sessionFallback: string | undefined;
+  get _requestFormat(): string | null {
+    return currentRequestContext()?.format ?? this._formatFallback;
+  }
+  set _requestFormat(value: string | null) {
+    const context = currentRequestContext();
+    if (context) context.format = value;
+    else this._formatFallback = value;
+  }
+  private get _clientSession(): string | undefined {
+    const context = currentRequestContext();
+    return context ? context.session : this._sessionFallback;
+  }
+  private set _clientSession(value: string | undefined) {
+    const context = currentRequestContext();
+    if (context) context.session = value;
+    else this._sessionFallback = value;
+  }
+  private _surface = () => surfaceFromBaseUrl(this.config?.baseUrl);
+
+  /**
+   * Free-tier retry context: the request-scoped contract state the retry helper needs.
+   */
+  private freeTierRetryCtx(input: ExecuteInput) {
+    // The contract attempt is keyed by the request body, so read it back from
+    // there instead of a shared field (#14148).
+    const attempt = attemptFor(input.body);
+    return {
+      surface: this._surface(),
+      provider: this.provider,
+      requestFormat: this._requestFormat,
+      clientSession: this._clientSession,
+      borrowed: attempt?.borrowed,
+      clientToolNames: attempt?.clientToolNames ?? [],
+    };
+  }
 
   /**
    * Per-account rotation state, rebuilt from credentials on each request. The
@@ -231,8 +304,34 @@ export class OpencodeExecutor extends BaseExecutor {
     return `${fingerprint.slice(0, 8)}…`;
   }
 
+  /**
+   * Hand a JSON caller a JSON body even though the free-tier contract forced the upstream
+   * request to stream. A streaming caller, a refusal and an already-JSON body pass through.
+   */
+  private finalizeForcedStream(
+    input: ExecuteInput,
+    result: Awaited<ReturnType<BaseExecutor["execute"]>>
+  ): Awaited<ReturnType<BaseExecutor["execute"]>> {
+    const attempt = attemptFor(input.body);
+    noteFreeTierOutcome(attempt, "response" in result && !!result.response?.ok);
+    if (input.stream) return result;
+    if (!("response" in result) || !result.response) return result;
+    // Non-null exactly when the contract applied: stands in for a surface/model guard.
+    if (!attempt) return result;
+    const response = rebuildJsonFromForcedStream(
+      result.response,
+      this._requestFormat,
+      attempt.model
+    );
+    return response === result.response ? result : { ...result, response };
+  }
+
   async execute(input: ExecuteInput) {
-    this._requestFormat = getModelTargetFormat(this.provider, input.model) || "openai";
+    return runInRequestContext(() => withRequestShapeRetry(input, (i) => this.executeOnce(i)));
+  }
+
+  private async executeOnce(input: ExecuteInput) {
+    this._requestFormat = resolveOpencodeTargetFormat(this.provider, input.model);
     try {
       this.syncAccountsFromCredentials(input.credentials);
 
@@ -241,9 +340,25 @@ export class OpencodeExecutor extends BaseExecutor {
       const prepared = withSynthesizedOpencodeSession(input, this.provider);
 
       const hasProxies = this.accounts.some((a) => a.proxy !== null);
-      // Fast path: no multi-account proxy wiring configured → original behavior.
+      // Fast path: no multi-account proxy wiring configured → original behavior, plus
+      // the same bounded free-tier refusal retry the rotation loop runs (observed tool
+      // names appended once; a refusal that survives it is returned as-is).
       if (this.accounts.length === 1 && !hasProxies) {
-        return await super.execute(prepared);
+        const single = await super.execute(prepared);
+        const first = single as { response: Response };
+        const retryAfterRefusal = await retryFreeTierRefusalWithObservedTools(
+          this.freeTierRetryCtx(input),
+          prepared,
+          first,
+          prepared.log,
+          "",
+          (retryInput) =>
+            super.execute(retryInput).then((r) => (r instanceof Response ? { response: r } : r))
+        );
+        if (retryAfterRefusal) {
+          return this.finalizeForcedStream(input, retryAfterRefusal);
+        }
+        return this.finalizeForcedStream(input, single);
       }
 
       const { log } = prepared;
@@ -279,12 +394,49 @@ export class OpencodeExecutor extends BaseExecutor {
           continue;
         }
 
-        this.markSuccess(account);
-        return result;
+        // Free-tier refusal: upstream rejected the REQUEST (client identity or
+        // request shape), not this account. One bounded retry with observed tools
+        // appended, then the refusal is returned unchanged — no rotation, no
+        // account-health write (every sibling account gets the same verdict).
+        if (status === 403 || status === 451) {
+          let bodyText: string | null = null;
+          try {
+            bodyText = await result.response.clone().text();
+          } catch {
+            log?.debug?.("OPENCODE", "body read failed on free-tier check");
+          }
+          if (bodyText !== null && isOpencodeFreeTierRefusal(status, bodyText)) {
+            return await handleLoopFreeTierRefusal(
+              (retried) => this.finalizeForcedStream(input, retried),
+              input,
+              result,
+              this.freeTierRetryCtx(input),
+              { account, masked, proxyKey: proxyKeyOf(account.proxy) ?? "direct" },
+              log,
+              "",
+              {
+                dispatch: (retryInput) =>
+                  runWithProxyContext(account.proxy, () =>
+                    super.execute({
+                      ...withSynthesizedOpencodeSession(retryInput, this.provider),
+                      skipUpstreamRetry: true,
+                    })
+                  ).then((r) => (r instanceof Response ? { response: r } : r)),
+                noteServed: () => undefined,
+              }
+            );
+          }
+        }
+
+        // Account-health reset is reserved for HTTP successes: calling it on a
+        // refusal/error would erase the cooldown backoff a healthy rotation
+        // earned (#14011).
+        if (result.response.ok) this.markSuccess(account);
+        return this.finalizeForcedStream(input, result);
       }
 
       // All accounts returned 429 (or errored) — surface the last response.
-      return lastResult ?? (await super.execute(prepared));
+      return lastResult ?? this.finalizeForcedStream(input, await super.execute(prepared));
     } finally {
       this._requestFormat = null;
     }
@@ -316,7 +468,9 @@ export class OpencodeExecutor extends BaseExecutor {
     credentials: ProviderCredentials | null,
     stream = true,
     clientHeaders?: Record<string, string> | null,
-    model?: string
+    model?: string,
+    _health?: Record<string, unknown>,
+    body?: unknown
   ) {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     // #8467: honor Extra API Keys rotation via BaseExecutor.resolveEffectiveKey.
@@ -337,39 +491,33 @@ export class OpencodeExecutor extends BaseExecutor {
       headers["anthropic-version"] = "2023-06-01";
     }
 
-    if (stream) {
+    // The free tier only answers streamed requests (measured 2026-09-17: a non-streamed
+    // body answers 403 FreeTierError), so a JSON client is served by streaming upstream and
+    // rebuilding the JSON body from the event stream — the path chatCore already takes for
+    // any buffered event-stream response. Announcing the stream here keeps that buffering an
+    // expected outcome rather than a warning.
+    const gatedScope =
+      Boolean(model) && isGatedFreeTierRequest(this._surface(), this.provider, model);
+    if (stream || gatedScope) {
       headers["Accept"] = "text/event-stream";
     }
 
-    // Opt-in (#5997): synthesize OpenCode CLI identity headers the client did not send.
-    // Cloudflare in front of opencode.ai/zen/go 403s server-side (VPS) requests lacking
-    // CLI identity, but the forward-only default is deliberate — fabricating a WRONG
-    // value risks upstream rejection (#5720 regressed with "opencode/local"), and this
-    // is deployment-specific. So it stays OFF by default and the VPS operator enables it
-    // with OPENCODE_SYNTHESIZE_CLI_HEADERS=true (values env-overridable). Client-supplied
-    // headers always take precedence.
-    const synthesizeCli = /^(1|true|yes|on)$/i.test(
-      process.env.OPENCODE_SYNTHESIZE_CLI_HEADERS?.trim() ?? ""
+    // Synthesize OpenCode CLI identity headers by default so Cloudflare in front of
+    // opencode.ai/zen doesn't 429 VPS requests lacking CLI identity. Opt-out via
+    // OPENCODE_SYNTHESIZE_CLI_HEADERS=false. Client-supplied headers always win;
+    // User-Agent is replaced with the CLI UA unless the client already sends one that
+    // satisfies the OpenCode version contract. (#5997, #14013)
+    const cliDefaults = resolveOpencodeCliDefaults(
+      this.config?.id || this.provider || "opencode",
+      gatedScope
     );
-    const cliDefaults = synthesizeCli
-      ? (() => {
-          const providerId = this.config?.id || this.provider || "opencode";
-          const envUAKey = `${providerId.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_USER_AGENT`;
-          return {
-            userAgent:
-              process.env[envUAKey]?.trim() ||
-              process.env.OPENCODE_USER_AGENT?.trim() ||
-              "opencode-cli/1.0.0",
-            client: process.env.OPENCODE_CLIENT?.trim() || "cli",
-            project: process.env.OPENCODE_PROJECT?.trim() || "default",
-          };
-        })()
-      : undefined;
 
+    this._clientSession = clientSuppliedOpencodeSession(clientHeaders, body);
     if (clientHeaders || cliDefaults) {
       forwardOpencodeClientHeaders(headers, clientHeaders ?? {}, {
         synthesizeRequestId: true,
         cliDefaults,
+        sessionBody: projectOpencodeSessionBody(body),
       });
     }
 
@@ -385,6 +533,19 @@ export class OpencodeExecutor extends BaseExecutor {
     credentials: ProviderCredentials
   ): any {
     let modifiedBody = super.transformRequest(model, body, stream, credentials);
+    // Free-tier request contract (see opencodeFreeTierContract.ts): streaming plus a
+    // non-empty tools array, in the shape of the surface this model is served on. Paid
+    // models on the same host are not gated and stay untouched.
+    const prepared = prepareFreeTierRequest(
+      modifiedBody,
+      this._requestFormat ?? resolveOpencodeTargetFormat(this.provider, model),
+      this._surface(),
+      this.provider,
+      model,
+      this._clientSession,
+      body
+    );
+    modifiedBody = prepared.body;
     // 9router#1442: OpenCode upstreams (e.g. kimi-k2.6 via opencode-go) return
     // 400 "Extra inputs are not permitted, field: 'client_metadata'" — an
     // OpenAI-Codex/Claude-CLI passthrough field with no equivalent here. The
@@ -434,6 +595,11 @@ export class OpencodeExecutor extends BaseExecutor {
     }
     if (modifiedBody && typeof modifiedBody === "object" && !Array.isArray(modifiedBody)) {
       const mb = modifiedBody as Record<string, unknown>;
+      // OpenCode accepts stream_options only on streaming Chat Completions (#13699).
+      const format = this._requestFormat ?? resolveOpencodeTargetFormat(this.provider, model);
+      if (format !== "openai" || mb.stream !== true) {
+        delete mb.stream_options;
+      }
       const parsed = parseEffortLevel(model);
       if (parsed) {
         mb.model = parsed.baseModel;

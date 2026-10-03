@@ -249,7 +249,10 @@ function collectThinkingConfigs(body: unknown): Array<Record<string, unknown>> {
   if (!body || typeof body !== "object") return [];
   const root = body as Record<string, unknown>;
   const configs: Array<Record<string, unknown>> = [];
-  const envelopes: unknown[] = [root.generationConfig, (root.request as Record<string, unknown> | undefined)?.generationConfig];
+  const envelopes: unknown[] = [
+    root.generationConfig,
+    (root.request as Record<string, unknown> | undefined)?.generationConfig,
+  ];
   for (const env of envelopes) {
     if (!env || typeof env !== "object") continue;
     const tc = (env as Record<string, unknown>).thinkingConfig;
@@ -511,10 +514,12 @@ export class BaseExecutor {
     stream = true,
     clientHeaders?: Record<string, string> | null,
     model?: string,
-    health?: Record<string, KeyHealth>
+    health?: Record<string, KeyHealth>,
+    body?: unknown
   ): Record<string, string> {
     void clientHeaders;
     void model;
+    void body;
     const { headers, effectiveKey } = this.buildHeadersPreamble(credentials, stream);
 
     if (credentials.accessToken) {
@@ -821,7 +826,14 @@ export class BaseExecutor {
         activeCredentials
       );
       const url = this.buildUrl(model, stream, urlIndex, requestCredentials);
-      const headers = this.buildHeaders(requestCredentials, stream, clientHeaders, model);
+      const headers = this.buildHeaders(
+        requestCredentials,
+        stream,
+        clientHeaders,
+        model,
+        undefined,
+        body
+      );
       applyConfiguredUserAgent(headers, requestCredentials?.providerSpecificData);
 
       // Strip OpenAI SDK (X-Stainless-*) metadata + normalize SDK-derived User-Agent

@@ -94,31 +94,55 @@ describe("OpencodeExecutor – x-opencode-session synthesis (Console Go 400)", (
     assert.notEqual(first, second);
   });
 
-  it("keeps a client-supplied x-opencode-session (client value wins)", async () => {
+  it("keeps a client-supplied x-opencode-session already in the canonical shape", async () => {
+    const canonical = "ses_0123456789abAbCdEfGhIjKlMn";
     await executor.execute(
       createInput("deepseek-v4.1-flash", {
-        clientHeaders: { "x-opencode-session": "client-session-abc" },
+        clientHeaders: { "x-opencode-session": canonical },
       })
     );
-    assert.equal(fetchCalls[0].options.headers["x-opencode-session"], "client-session-abc");
+    assert.equal(fetchCalls[0].options.headers["x-opencode-session"], canonical);
   });
 
-  it("maps client x-session-id to x-opencode-session", async () => {
+  it("translates a non-canonical client session to a deterministic canonical id", async () => {
+    // The upstream free tier only accepts the canonical `ses_<12 hex><14 base62>` shape;
+    // anything else (a UUID, an opaque conversation key) is translated one-to-one so one
+    // client conversation still maps to one upstream session.
+    for (let i = 0; i < 2; i++) {
+      await executor.execute(
+        createInput("deepseek-v4.1-flash", {
+          clientHeaders: { "x-opencode-session": "client-session-abc" },
+        })
+      );
+    }
+    const first = fetchCalls[0].options.headers["x-opencode-session"];
+    const second = fetchCalls[1].options.headers["x-opencode-session"];
+    assert.match(first, /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/);
+    assert.equal(first, second, "same client value must map to the same upstream session");
+  });
+
+  it("maps client x-session-id to a canonical x-opencode-session", async () => {
     await executor.execute(
       createInput("deepseek-v4.1-flash", {
         clientHeaders: { "x-session-id": "sid-123" },
       })
     );
-    assert.equal(fetchCalls[0].options.headers["x-opencode-session"], "sid-123");
+    assert.match(
+      fetchCalls[0].options.headers["x-opencode-session"],
+      /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/
+    );
   });
 
-  it("maps client x-omniroute-session-id to x-opencode-session", async () => {
+  it("maps client x-omniroute-session-id to a canonical x-opencode-session", async () => {
     await executor.execute(
       createInput("deepseek-v4.1-flash", {
         clientHeaders: { "x-omniroute-session-id": "omni-sid-9" },
       })
     );
-    assert.equal(fetchCalls[0].options.headers["x-opencode-session"], "omni-sid-9");
+    assert.match(
+      fetchCalls[0].options.headers["x-opencode-session"],
+      /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/
+    );
   });
 
   it("does not mutate the caller's clientHeaders object (read-only contract)", async () => {
