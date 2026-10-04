@@ -258,6 +258,15 @@ model lockout / cooldown, and (on the synthetic `noauth` path) pauses auto-combo
 for a short TTL. Ship requests that carry a non-empty tool list, `stream: true`, and the
 OpenCode session/UA headers (`opencodeFreeTierContract.ts`) or expect the 403.
 
+**Rotation, 2026-10-04.** The gate moved again: a `_noop`-only tool list that passed at
+measurement time now answers 403 — a request is only served when it declares the
+file-search quartet (`bash`, `glob`, `grep`, `read`). Set
+`OPENCODE_FREE_TIER_PLACEHOLDER_TOOLS=bash,glob,grep,read` in the environment (the names
+the gate accepts are an observation about someone else's service, which is why they live
+in configuration and take effect per request, with no release needed). Verified against
+the live endpoint on 2026-10-04 from two egress IPs: quartet + `stream: true` + OpenCode
+session/UA headers → 200 with a real completion, quartet missing → 403 `FreeTierError`.
+
 ## What changed since the shipped catalog (`freeNote`)
 
 > The v3.8.0-era `freeNote` strings are stale. Corrections found by this research (these drive the catalog update in `_tasks/features-v3.8.12`):
