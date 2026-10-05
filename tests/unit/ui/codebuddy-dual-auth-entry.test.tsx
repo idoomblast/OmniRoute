@@ -6,7 +6,10 @@
 // to surface ONLY the API-key modal — the device-code sign-in had no entry
 // point, so free-tier accounts (no dashboard API keys) could not connect.
 // These tests pin both entry points on the connections toolbar and the empty
-// placeholder, mirroring 9router's dual-auth presentation.
+// placeholder, mirroring 9router's dual-auth presentation, and pin the
+// surrounding control providers (opencode, qoder, OAuth-only gemini) on BOTH
+// components so the dual-auth branch cannot hide (or leak into) neighbouring
+// entry flows.
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -28,10 +31,16 @@ function renderComponent(node: React.ReactElement) {
   return container;
 }
 
+function buttons(container: HTMLElement): HTMLButtonElement[] {
+  return Array.from(container.querySelectorAll("button"));
+}
+
 function buttonByText(container: HTMLElement, text: string) {
-  return Array.from(container.querySelectorAll("button")).find((button) =>
-    (button.textContent || "").includes(text)
-  );
+  return buttons(container).find((button) => (button.textContent || "").includes(text));
+}
+
+function countByText(container: HTMLElement, text: string): number {
+  return buttons(container).filter((button) => (button.textContent || "").includes(text)).length;
 }
 
 function clickInAct(button: Element | undefined) {
@@ -43,7 +52,8 @@ function clickInAct(button: Element | undefined) {
 
 // providerText() falls back to its literal fallback when the translator lacks a
 // `has` helper (see providerCredentialText.ts), so assertions match the English
-// fallbacks regardless of the message catalog.
+// fallbacks regardless of the message catalog. Raw t() calls (e.g. t("add"))
+// return the key itself with this passthrough translator.
 const t = ((key: string) => key) as unknown as ProviderMessageTranslator;
 
 type ToolbarProps = React.ComponentProps<typeof ConnectionsHeaderToolbar>;
@@ -132,7 +142,7 @@ describe("codebuddy dual-auth entry points", () => {
   });
 
   for (const providerId of ["codebuddy-cn", "codebuddy-intl"]) {
-    it(`${providerId}: toolbar keeps OAuth sign-in reachable next to manual API key`, () => {
+    it(`${providerId}: toolbar keeps OAuth sign-in reachable next to manual API key (no connections)`, () => {
       const onOpenOAuthModal = vi.fn();
       const openApiKeyAddFlow = vi.fn();
       const container = renderComponent(
@@ -141,10 +151,12 @@ describe("codebuddy dual-auth entry points", () => {
         />
       );
 
+      expect(countByText(container, "Sign in (OAuth)")).toBe(1);
+      expect(countByText(container, "Manual API key")).toBe(1);
+      expect(countByText(container, "Add PAT")).toBe(0);
+
       const oauthButton = buttonByText(container, "Sign in (OAuth)");
       const keyButton = buttonByText(container, "Manual API key");
-      expect(oauthButton).toBeTruthy();
-      expect(keyButton).toBeTruthy();
 
       clickInAct(oauthButton);
       expect(onOpenOAuthModal).toHaveBeenCalledTimes(1);
@@ -155,35 +167,223 @@ describe("codebuddy dual-auth entry points", () => {
       expect(onOpenOAuthModal).toHaveBeenCalledTimes(1);
     });
 
-    it(`${providerId}: empty placeholder keeps OAuth sign-in reachable`, () => {
+    it(`${providerId}: toolbar keeps both entry points with an existing connection`, () => {
       const onOpenOAuthModal = vi.fn();
+      const openApiKeyAddFlow = vi.fn();
       const container = renderComponent(
-        <EmptyConnectionsPlaceholder {...placeholderProps({ providerId, onOpenOAuthModal })} />
+        <ConnectionsHeaderToolbar
+          {...toolbarProps({
+            providerId,
+            connections: [{ id: "conn-1" }],
+            onOpenOAuthModal,
+            openApiKeyAddFlow,
+          })}
+        />
       );
 
-      const oauthButton = buttonByText(container, "Sign in (OAuth)");
-      expect(oauthButton).toBeTruthy();
-      expect(buttonByText(container, "Manual API key")).toBeTruthy();
+      expect(countByText(container, "Sign in (OAuth)")).toBe(1);
+      expect(countByText(container, "Manual API key")).toBe(1);
 
-      clickInAct(oauthButton);
+      clickInAct(buttonByText(container, "Sign in (OAuth)"));
+      expect(onOpenOAuthModal).toHaveBeenCalledTimes(1);
+      expect(openApiKeyAddFlow).not.toHaveBeenCalled();
+
+      clickInAct(buttonByText(container, "Manual API key"));
+      expect(openApiKeyAddFlow).toHaveBeenCalledTimes(1);
+      expect(onOpenOAuthModal).toHaveBeenCalledTimes(1);
+    });
+
+    it(`${providerId}: empty placeholder keeps OAuth sign-in reachable and manual-key dispatch separate`, () => {
+      const onOpenOAuthModal = vi.fn();
+      const openApiKeyAddFlow = vi.fn();
+      const container = renderComponent(
+        <EmptyConnectionsPlaceholder
+          {...placeholderProps({ providerId, onOpenOAuthModal, openApiKeyAddFlow })}
+        />
+      );
+
+      expect(countByText(container, "Sign in (OAuth)")).toBe(1);
+      expect(countByText(container, "Manual API key")).toBe(1);
+
+      clickInAct(buttonByText(container, "Sign in (OAuth)"));
+      expect(onOpenOAuthModal).toHaveBeenCalledTimes(1);
+      expect(openApiKeyAddFlow).not.toHaveBeenCalled();
+
+      // Manual-key click must fire ONLY the API-key callback (separation).
+      clickInAct(buttonByText(container, "Manual API key"));
+      expect(openApiKeyAddFlow).toHaveBeenCalledTimes(1);
       expect(onOpenOAuthModal).toHaveBeenCalledTimes(1);
     });
   }
 
-  it("PAT-only free providers (opencode) keep the add-PAT flow without an OAuth button", () => {
+  it("PAT-only free providers (opencode): toolbar keeps exactly the add-PAT entry", () => {
+    const openPrimaryAddFlow = vi.fn();
+    const openApiKeyAddFlow = vi.fn();
+    const onOpenOAuthModal = vi.fn();
     const container = renderComponent(
-      <ConnectionsHeaderToolbar {...toolbarProps({ providerId: "opencode" })} />
+      <ConnectionsHeaderToolbar
+        {...toolbarProps({
+          providerId: "opencode",
+          openPrimaryAddFlow,
+          openApiKeyAddFlow,
+          onOpenOAuthModal,
+        })}
+      />
     );
-    expect(buttonByText(container, "Add PAT")).toBeTruthy();
-    expect(buttonByText(container, "Sign in (OAuth)")).toBeUndefined();
+
+    expect(countByText(container, "Add PAT")).toBe(1);
+    expect(countByText(container, "Sign in (OAuth)")).toBe(0);
+    expect(countByText(container, "Manual API key")).toBe(0);
+    expect(countByText(container, "Experimental OAuth")).toBe(0);
+
+    clickInAct(buttonByText(container, "Add PAT"));
+    expect(openPrimaryAddFlow).toHaveBeenCalledTimes(1);
+    expect(openApiKeyAddFlow).not.toHaveBeenCalled();
+    expect(onOpenOAuthModal).not.toHaveBeenCalled();
   });
 
-  it("qoder keeps its existing Add PAT + Experimental OAuth pairing", () => {
+  it("PAT-only free providers (opencode): placeholder keeps exactly the add-PAT entry", () => {
+    const openPrimaryAddFlow = vi.fn();
+    const openApiKeyAddFlow = vi.fn();
+    const onOpenOAuthModal = vi.fn();
     const container = renderComponent(
-      <ConnectionsHeaderToolbar {...toolbarProps({ providerId: "qoder" })} />
+      <EmptyConnectionsPlaceholder
+        {...placeholderProps({
+          providerId: "opencode",
+          providerSupportsPat: true,
+          isOAuth: false,
+          openPrimaryAddFlow,
+          openApiKeyAddFlow,
+          onOpenOAuthModal,
+        })}
+      />
     );
-    expect(buttonByText(container, "Add PAT")).toBeTruthy();
-    expect(buttonByText(container, "Experimental OAuth")).toBeTruthy();
-    expect(buttonByText(container, "Sign in (OAuth)")).toBeUndefined();
+
+    expect(countByText(container, "Add PAT")).toBe(1);
+    expect(countByText(container, "Sign in (OAuth)")).toBe(0);
+    expect(countByText(container, "Manual API key")).toBe(0);
+
+    clickInAct(buttonByText(container, "Add PAT"));
+    expect(openPrimaryAddFlow).toHaveBeenCalledTimes(1);
+    expect(openApiKeyAddFlow).not.toHaveBeenCalled();
+    expect(onOpenOAuthModal).not.toHaveBeenCalled();
+  });
+
+  it("qoder keeps its existing Add PAT + Experimental OAuth pairing on the toolbar", () => {
+    const openPrimaryAddFlow = vi.fn();
+    const openApiKeyAddFlow = vi.fn();
+    const onOpenOAuthModal = vi.fn();
+    const container = renderComponent(
+      <ConnectionsHeaderToolbar
+        {...toolbarProps({
+          providerId: "qoder",
+          openPrimaryAddFlow,
+          openApiKeyAddFlow,
+          onOpenOAuthModal,
+        })}
+      />
+    );
+
+    expect(countByText(container, "Add PAT")).toBe(1);
+    expect(countByText(container, "Experimental OAuth")).toBe(1);
+    expect(countByText(container, "Sign in (OAuth)")).toBe(0);
+    expect(countByText(container, "Manual API key")).toBe(0);
+
+    clickInAct(buttonByText(container, "Add PAT"));
+    expect(openPrimaryAddFlow).toHaveBeenCalledTimes(1);
+    expect(onOpenOAuthModal).not.toHaveBeenCalled();
+
+    clickInAct(buttonByText(container, "Experimental OAuth"));
+    expect(onOpenOAuthModal).toHaveBeenCalledTimes(1);
+    expect(openApiKeyAddFlow).not.toHaveBeenCalled();
+  });
+
+  it("qoder keeps its existing Add PAT + Experimental OAuth pairing on the placeholder", () => {
+    const openPrimaryAddFlow = vi.fn();
+    const openApiKeyAddFlow = vi.fn();
+    const onOpenOAuthModal = vi.fn();
+    const container = renderComponent(
+      <EmptyConnectionsPlaceholder
+        {...placeholderProps({
+          providerId: "qoder",
+          providerSupportsPat: true,
+          isOAuth: false,
+          openPrimaryAddFlow,
+          openApiKeyAddFlow,
+          onOpenOAuthModal,
+        })}
+      />
+    );
+
+    expect(countByText(container, "Add PAT")).toBe(1);
+    expect(countByText(container, "Experimental OAuth")).toBe(1);
+
+    clickInAct(buttonByText(container, "Add PAT"));
+    expect(openPrimaryAddFlow).toHaveBeenCalledTimes(1);
+
+    clickInAct(buttonByText(container, "Experimental OAuth"));
+    expect(onOpenOAuthModal).toHaveBeenCalledTimes(1);
+    expect(openApiKeyAddFlow).not.toHaveBeenCalled();
+  });
+
+  it("OAuth-only providers (gemini): toolbar renders a single primary entry dispatching openPrimaryAddFlow", () => {
+    const openPrimaryAddFlow = vi.fn();
+    const openApiKeyAddFlow = vi.fn();
+    const onOpenOAuthModal = vi.fn();
+    const container = renderComponent(
+      <ConnectionsHeaderToolbar
+        {...toolbarProps({
+          providerId: "gemini",
+          isOAuth: true,
+          providerSupportsPat: false,
+          openPrimaryAddFlow,
+          openApiKeyAddFlow,
+          onOpenOAuthModal,
+        })}
+      />
+    );
+
+    // The single primary entry uses t("add"); with the passthrough translator
+    // plus its material-icon span the normalized text is "addadd".
+    const entries = buttons(container).filter(
+      (button) => (button.textContent || "").replace(/\s+/g, "") === "addadd"
+    );
+    expect(entries).toHaveLength(1);
+    expect(countByText(container, "Add PAT")).toBe(0);
+    expect(countByText(container, "Sign in (OAuth)")).toBe(0);
+    expect(countByText(container, "Manual API key")).toBe(0);
+
+    clickInAct(entries[0]);
+    expect(openPrimaryAddFlow).toHaveBeenCalledTimes(1);
+    expect(openApiKeyAddFlow).not.toHaveBeenCalled();
+    expect(onOpenOAuthModal).not.toHaveBeenCalled();
+  });
+
+  it("OAuth-only providers (gemini): placeholder renders a single primary entry dispatching openPrimaryAddFlow", () => {
+    const openPrimaryAddFlow = vi.fn();
+    const openApiKeyAddFlow = vi.fn();
+    const onOpenOAuthModal = vi.fn();
+    const container = renderComponent(
+      <EmptyConnectionsPlaceholder
+        {...placeholderProps({
+          providerId: "gemini",
+          providerSupportsPat: false,
+          isOAuth: true,
+          openPrimaryAddFlow,
+          openApiKeyAddFlow,
+          onOpenOAuthModal,
+        })}
+      />
+    );
+
+    expect(countByText(container, "addConnection")).toBe(1);
+    expect(countByText(container, "Add PAT")).toBe(0);
+    expect(countByText(container, "Sign in (OAuth)")).toBe(0);
+    expect(countByText(container, "Manual API key")).toBe(0);
+
+    clickInAct(buttonByText(container, "addConnection"));
+    expect(openPrimaryAddFlow).toHaveBeenCalledTimes(1);
+    expect(openApiKeyAddFlow).not.toHaveBeenCalled();
+    expect(onOpenOAuthModal).not.toHaveBeenCalled();
   });
 });
