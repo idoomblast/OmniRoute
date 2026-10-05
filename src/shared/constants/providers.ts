@@ -443,6 +443,7 @@ export const USAGE_SUPPORTED_PROVIDERS = [
   "vertex",
   "vertex-partner",
   "codebuddy-cn",
+  "codebuddy-intl",
   // PromptQL playground credits (getCreditSummary → USD micros)
   "promptql",
   "pql",

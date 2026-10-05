@@ -17,8 +17,12 @@ import { CodeBuddyIntlExecutor } from "../../open-sse/executors/codebuddy-intl.t
 import { DefaultExecutor } from "../../open-sse/executors/default.ts";
 import { getExecutor, hasSpecializedExecutor } from "../../open-sse/executors/index.ts";
 import { parseUpstreamError } from "../../open-sse/utils/error.ts";
+import { getCodeBuddyIntlUsage } from "../../open-sse/services/usage/codebuddy-intl.ts";
+import { getUsageForProvider, USAGE_FETCHER_PROVIDERS } from "../../open-sse/services/usage.ts";
+import { isSupportedUsageConnection } from "../../src/lib/usage/providerLimits.ts";
 import {
   OAUTH_PROVIDERS as DASHBOARD_OAUTH_PROVIDERS,
+  USAGE_SUPPORTED_PROVIDERS,
   resolveProviderId,
   supportsApiKeyOnFreeProvider,
 } from "../../src/shared/constants/providers.ts";
@@ -629,4 +633,246 @@ test("International leaves successful JSON answers mentioning frequency limits u
     skipUpstreamRetry: true,
   });
   assert.equal(result instanceof Response ? result : result.response, upstream);
+});
+
+test("International usage is admitted for OAuth and both API-key auth spellings", () => {
+  assert.ok(USAGE_SUPPORTED_PROVIDERS.includes("codebuddy-intl"));
+  assert.ok(USAGE_FETCHER_PROVIDERS.includes("codebuddy-intl"));
+  for (const authType of ["oauth", "apikey", "api_key"]) {
+    assert.equal(
+      isSupportedUsageConnection({ id: "intl-usage", provider: "codebuddy-intl", authType }),
+      true
+    );
+  }
+  assert.equal(
+    isSupportedUsageConnection({
+      id: "intl-usage",
+      provider: "codebuddy-intl",
+      authType: "unknown",
+    }),
+    false
+  );
+});
+
+test("International usage dispatches the IDE billing wire request and keeps refill and bonus balances separate", async () => {
+  const monthlyEnd = "2026-11-01T00:00:00Z";
+  const validityEnd = Date.parse("2027-01-01T00:00:00Z") / 1000;
+  const bonusSoon = "2026-10-20T00:00:00Z";
+  const bonusLater = "2026-10-25T00:00:00Z";
+  const accounts = [
+    {
+      PackageName: "Monthly allowance",
+      CycleStartTime: "2026-10-01T00:00:00Z",
+      CycleEndTime: monthlyEnd,
+      DeductionEndTime: validityEnd,
+      CycleCapacitySize: 400,
+      CycleCapacitySizePrecise: "500",
+      CycleCapacityUsed: 10,
+      CycleCapacityUsedPrecise: "12.34",
+      CapacitySize: 9999,
+      CapacityUsed: 999,
+    },
+    {
+      PackageName: "Bonus later",
+      CycleEndTime: bonusLater,
+      DeductionEndTime: String(Date.parse(bonusLater) / 1000),
+      CapacitySize: 50,
+      CapacityUsed: 1,
+    },
+    {
+      PackageName: "Bonus sooner",
+      CycleEndTime: bonusSoon,
+      DeductionEndTime: Date.parse(bonusSoon),
+      CapacitySize: 20,
+      CapacitySizePrecise: "25",
+      CapacityUsed: 2,
+      CapacityUsedPrecise: "5",
+      CycleCapacitySize: 9999,
+    },
+  ];
+  for (const credentials of [
+    { accessToken: "test-access", apiKey: "unused-api-key" },
+    { apiKey: "test-api-key" },
+  ]) {
+    let calls = 0;
+    globalThis.fetch = async (url, init) => {
+      calls++;
+      assert.equal(url, "https://www.codebuddy.ai/v2/billing/meter/get-user-resource");
+      assert.equal(init?.method, "POST");
+      assert.equal(init?.body, "{}");
+      const headers = new Headers(init?.headers);
+      assert.equal(
+        headers.get("Authorization"),
+        `Bearer ${credentials.accessToken ?? credentials.apiKey}`
+      );
+      assert.equal(headers.get("Content-Type"), "application/json");
+      assert.equal(headers.get("Accept"), "application/json");
+      for (const [name, value] of Object.entries(REGISTRY["codebuddy-intl"].headers)) {
+        assert.equal(headers.get(name), value);
+      }
+      return jsonResponse({ code: 0, data: { Response: { Data: { Accounts: accounts } } } });
+    };
+    const result = await getUsageForProvider({ provider: "codebuddy-intl", ...credentials });
+    assert.equal(calls, 1);
+    assert.deepEqual(result, {
+      plan: "Monthly allowance",
+      quotas: {
+        Monthly: {
+          used: 12.34,
+          total: 500,
+          resetAt: new Date(monthlyEnd).toISOString(),
+          unlimited: false,
+        },
+        "Bonus Pack 1": {
+          used: 5,
+          total: 25,
+          resetAt: new Date(bonusSoon).toISOString(),
+          unlimited: false,
+        },
+        "Bonus Pack 2": {
+          used: 1,
+          total: 50,
+          resetAt: new Date(bonusLater).toISOString(),
+          unlimited: false,
+        },
+      },
+    });
+  }
+});
+
+test("International usage distinguishes cadence, duplicate refills, reset encodings and default plan", async () => {
+  const accounts = [
+    {
+      CycleStartTime: "2026-10-01T00:00:00Z",
+      CycleEndTime: Date.parse("2026-10-02T00:00:00Z") / 1000,
+      DeductionEndTime: "2027-01-01T00:00:00Z",
+      CycleCapacitySize: 10,
+    },
+    {
+      CycleStartTime: "2026-10-02T00:00:00Z",
+      CycleEndTime: String(Date.parse("2026-10-03T00:00:00Z")),
+      DeductionEndTime: "2027-01-01T00:00:00Z",
+      CycleCapacitySize: 20,
+    },
+    {
+      CycleStartTime: "2026-10-01T00:00:00Z",
+      CycleEndTime: "2026-10-08T00:00:00Z",
+      DeductionEndTime: "2027-01-01T00:00:00Z",
+      CycleCapacitySize: 30,
+    },
+    {
+      CapacitySizePrecise: "not-a-number",
+      CapacityUsedPrecise: "not-a-number",
+      CycleEndTime: "invalid",
+    },
+  ];
+  globalThis.fetch = async () =>
+    jsonResponse({ code: 0, data: { Response: { Data: { Accounts: accounts } } } });
+  const result = await getCodeBuddyIntlUsage("test-access");
+  assert.equal(result.plan, "CodeBuddy International");
+  assert.deepEqual(result.quotas, {
+    Daily: { used: 0, total: 10, resetAt: "2026-10-02T00:00:00.000Z", unlimited: false },
+    "Daily 2": { used: 0, total: 20, resetAt: "2026-10-03T00:00:00.000Z", unlimited: false },
+    Weekly: { used: 0, total: 30, resetAt: "2026-10-08T00:00:00.000Z", unlimited: false },
+    "Bonus Pack 1": { used: 0, total: 0, resetAt: null, unlimited: false },
+  });
+});
+
+test("International usage preserves CN's strict two-day refill boundary", async () => {
+  const cycleEnd = Date.parse("2026-11-01T00:00:00Z");
+  const twoDays = 2 * 24 * 60 * 60 * 1000;
+  for (const [gap, name, used, total] of [
+    [twoDays, "Bonus Pack 1", 1, 100],
+    [twoDays + 1, "Monthly", 2, 200],
+  ] as const) {
+    globalThis.fetch = async () =>
+      jsonResponse({
+        code: 0,
+        data: {
+          Response: {
+            Data: {
+              Accounts: [
+                {
+                  CycleEndTime: cycleEnd,
+                  DeductionEndTime: cycleEnd + gap,
+                  CycleCapacitySize: 200,
+                  CycleCapacityUsed: 2,
+                  CapacitySize: 100,
+                  CapacityUsed: 1,
+                },
+              ],
+            },
+          },
+        },
+      });
+    assert.deepEqual((await getCodeBuddyIntlUsage("test-access")).quotas, {
+      [name]: { used, total, resetAt: new Date(cycleEnd).toISOString(), unlimited: false },
+    });
+  }
+});
+
+test("International usage handles missing credentials, API errors, empty quotas, and sanitized failures", async () => {
+  globalThis.fetch = async () => {
+    throw new Error("fetch should not run without credentials");
+  };
+  assert.deepEqual(await getCodeBuddyIntlUsage(), {
+    message: "CodeBuddy International credential not available.",
+  });
+  for (const status of [401, 403, 500]) {
+    globalThis.fetch = async () => jsonResponse({}, status);
+    assert.deepEqual(await getCodeBuddyIntlUsage("test-access"), {
+      message:
+        status === 500
+          ? "CodeBuddy International quota API error (500)."
+          : "CodeBuddy International credential invalid or expired.",
+    });
+  }
+  for (const data of [
+    {},
+    { Response: { Data: { Accounts: [] } } },
+    { Response: { Data: { Accounts: {} } } },
+  ]) {
+    globalThis.fetch = async () => jsonResponse({ code: 0, data });
+    assert.deepEqual(await getCodeBuddyIntlUsage("test-access"), {
+      message: "CodeBuddy International connected. No credit package found.",
+    });
+  }
+  globalThis.fetch = async () => jsonResponse({ code: 123, msg: "quota unavailable" });
+  assert.deepEqual(await getCodeBuddyIntlUsage("test-access"), {
+    message: "CodeBuddy International quota error: quota unavailable",
+  });
+  globalThis.fetch = async () =>
+    jsonResponse({ code: 123, msg: "Error: failure at /home/private/provider.ts:23:1" });
+  assert.doesNotMatch(
+    (await getCodeBuddyIntlUsage("test-access")).message ?? "",
+    /\/home\/private/
+  );
+  globalThis.fetch = async () =>
+    jsonResponse({ code: 123, msg: "failure\n/home/private/provider.ts:23:1" });
+  assert.doesNotMatch(
+    (await getCodeBuddyIntlUsage("test-access")).message ?? "",
+    /\n|\/home\/private/
+  );
+  globalThis.fetch = async () =>
+    jsonResponse({ code: 123, msg: "invalid Bearer test-access-value" });
+  assert.doesNotMatch(
+    (await getCodeBuddyIntlUsage("test-access")).message ?? "",
+    /test-access-value/
+  );
+  globalThis.fetch = async () =>
+    jsonResponse({ code: 0, data: { Response: { Data: { Accounts: [null] } } } });
+  assert.deepEqual(await getCodeBuddyIntlUsage("test-access"), {
+    message: "CodeBuddy International error: failed to fetch quota.",
+  });
+  globalThis.fetch = async () => {
+    throw new Error("Error at /home/private/provider.ts:23:1");
+  };
+  assert.deepEqual(await getCodeBuddyIntlUsage("test-access"), {
+    message: "CodeBuddy International error: failed to fetch quota.",
+  });
+  globalThis.fetch = async () =>
+    new Response("not JSON", { headers: { "Content-Type": "application/json" } });
+  assert.deepEqual(await getCodeBuddyIntlUsage("test-access"), {
+    message: "CodeBuddy International error: failed to fetch quota.",
+  });
 });

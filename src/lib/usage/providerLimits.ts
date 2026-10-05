@@ -82,6 +82,7 @@ const PROVIDER_LIMITS_APIKEY_PROVIDERS = new Set([
   // CodeBuddy CN accepts a Tencent gateway API key (Authorization: Bearer) and
   // exposes quota through copilot.tencent.com/v2/billing/meter/get-user-resource.
   "codebuddy-cn",
+  "codebuddy-intl",
   "promptql", // PromptQL playground JWT → getCreditSummary USD credits
   "pql",
   // Adobe Firefly: web-cookie / JWT stored as apikey → credits/balance
