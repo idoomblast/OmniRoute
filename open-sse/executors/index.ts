@@ -63,6 +63,7 @@ import { LMArenaExecutor } from "./lmarena.ts";
 import { MimocodeExecutor } from "./mimocode.ts";
 import { GrokCliExecutor } from "./grok-cli.ts";
 import { CodeBuddyCnExecutor } from "./codebuddy-cn.ts";
+import { CodeBuddyIntlExecutor } from "./codebuddy-intl.ts";
 import { ZenmuxFreeExecutor } from "./zenmux-free.ts";
 import { HyperAgentExecutor } from "./hyperagent.ts";
 import { XaiExecutor } from "./xai.ts";
@@ -183,6 +184,8 @@ const executors = {
   gc: new GrokCliExecutor(), // Alias
   "codebuddy-cn": new CodeBuddyCnExecutor(),
   cbcn: new CodeBuddyCnExecutor(), // Alias for codebuddy-cn
+  "codebuddy-intl": new CodeBuddyIntlExecutor(),
+  cbai: new CodeBuddyIntlExecutor(), // Alias for codebuddy-intl
   "zenmux-free": new ZenmuxFreeExecutor(),
   hyperagent: new HyperAgentExecutor(),
   ha: new HyperAgentExecutor(), // Alias
@@ -278,6 +281,7 @@ export { LMArenaExecutor } from "./lmarena.ts";
 export { MimocodeExecutor } from "./mimocode.ts";
 export { GrokCliExecutor } from "./grok-cli.ts";
 export { CodeBuddyCnExecutor } from "./codebuddy-cn.ts";
+export { CodeBuddyIntlExecutor } from "./codebuddy-intl.ts";
 export { ZenmuxFreeExecutor } from "./zenmux-free.ts";
 export { HyperAgentExecutor } from "./hyperagent.ts";
 export { XaiExecutor } from "./xai.ts";

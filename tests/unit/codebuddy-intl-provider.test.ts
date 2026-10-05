@@ -13,6 +13,10 @@ import { refreshCodebuddyIntlToken } from "../../open-sse/services/tokenRefresh/
 import { getAccessToken, supportsTokenRefresh } from "../../open-sse/services/tokenRefresh.ts";
 import { REGISTRY, generateModels } from "../../open-sse/config/providerRegistry.ts";
 import { PROVIDER_ID_TO_ALIAS } from "../../open-sse/config/providerModels.ts";
+import { CodeBuddyIntlExecutor } from "../../open-sse/executors/codebuddy-intl.ts";
+import { DefaultExecutor } from "../../open-sse/executors/default.ts";
+import { getExecutor, hasSpecializedExecutor } from "../../open-sse/executors/index.ts";
+import { parseUpstreamError } from "../../open-sse/utils/error.ts";
 import {
   OAUTH_PROVIDERS as DASHBOARD_OAUTH_PROVIDERS,
   resolveProviderId,
@@ -289,4 +293,340 @@ test("International refresh returns null for missing, rejected, malformed, or fa
     throw new Error("network unavailable");
   };
   assert.equal(await refreshCodebuddyIntlToken("bogus"), null);
+});
+
+const executor = new CodeBuddyIntlExecutor();
+const neutralPrompt = "You are a helpful AI assistant that helps with software engineering tasks.";
+const tool = (description: string) => ({
+  type: "function",
+  function: { name: "read_file", description, parameters: { type: "object", properties: {} } },
+});
+const transform = (body: Record<string, unknown>) =>
+  executor.transformRequest("glm-5.2", body, false, {}) as Record<string, unknown>;
+
+test("International executor is registered by id and cbai, forces SSE and uses IDE bearer headers", () => {
+  for (const id of ["codebuddy-intl", "cbai"]) {
+    assert.ok(getExecutor(id) instanceof CodeBuddyIntlExecutor);
+    assert.equal(hasSpecializedExecutor(id), true);
+  }
+  assert.equal(executor.buildUrl("glm-5.2", false), REGISTRY["codebuddy-intl"].baseUrl);
+  for (const credentials of [{ accessToken: "test-access" }, { apiKey: "test-api-key" }]) {
+    const headers = new Headers(executor.buildHeaders(credentials, true));
+    assert.equal(
+      headers.get("Authorization"),
+      `Bearer ${credentials.accessToken ?? credentials.apiKey}`
+    );
+    for (const [name, value] of Object.entries(REGISTRY["codebuddy-intl"].headers)) {
+      assert.equal(headers.get(name), value);
+    }
+  }
+  assert.equal(transform({ stream: false }).stream, true);
+});
+
+test("International reasoning is opt-in and none/off do not add a summary", () => {
+  for (const effort of [undefined, "none", "off"]) {
+    const out = transform({
+      reasoning_effort: effort,
+      messages: [{ role: "user", content: "hi" }],
+    });
+    assert.equal(out.reasoning_effort, undefined);
+    assert.equal(out.reasoning_summary, undefined);
+  }
+  const out = transform({ reasoning_effort: "high" });
+  assert.equal(out.reasoning_effort, "high");
+  assert.equal(out.reasoning_summary, "auto");
+});
+
+test("International normalization supplies a leading system and typed user text without dropping messages", () => {
+  const input = {
+    messages: [
+      { role: "user", content: "hello", name: "caller" },
+      { role: "system", content: "Reply in Spanish." },
+      { role: "developer", content: "Keep replies short." },
+      { role: "system", content: [{ type: "text", text: "Use JSON." }] },
+      {
+        role: "user",
+        content: [{ type: "image_url", image_url: { url: "https://example.com/image.png" } }],
+      },
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          { id: "call_1", type: "function", function: { name: "read_file", arguments: "{}" } },
+        ],
+      },
+      { role: "tool", tool_call_id: "call_1", content: "file contents" },
+    ],
+  };
+  const before = structuredClone(input);
+  assert.deepEqual(transform(input).messages, [
+    input.messages[1],
+    { ...input.messages[0], content: [{ type: "text", text: "hello" }] },
+    ...input.messages.slice(2),
+  ]);
+  assert.deepEqual(input, before, "caller-owned messages must not be mutated");
+  assert.deepEqual(
+    transform({
+      messages: [
+        { role: "developer", content: "Stay concise." },
+        { role: "user", content: "" },
+      ],
+    }).messages,
+    [
+      { role: "system", content: "You are CodeBuddy Code." },
+      { role: "developer", content: "Stay concise." },
+      { role: "user", content: [{ type: "text", text: "" }] },
+    ]
+  );
+  assert.deepEqual(transform({ messages: [] }).messages, [
+    { role: "system", content: "You are CodeBuddy Code." },
+  ]);
+});
+
+test("International neutralizes agent identities and >2000-char system prompts while preserving shape", () => {
+  for (const text of [
+    "You are Claude Code, Anthropic's official CLI.",
+    "You are Cursor.",
+    "You are an AI coding agent.",
+    "OhMyOpenCode orchestration capabilities",
+    "<Role>software agent</Role>",
+    "x".repeat(2001),
+  ]) {
+    for (const content of [text, [{ type: "text", text }]]) {
+      const expected =
+        typeof content === "string" ? neutralPrompt : [{ type: "text", text: neutralPrompt }];
+      const input = { system: content, messages: [{ role: "system", content }] };
+      const before = structuredClone(input);
+      const out = transform(input);
+      assert.deepEqual(out.system, expected);
+      assert.deepEqual(out.messages, [{ role: "system", content: expected }]);
+      assert.deepEqual(input, before);
+      const topOnly = transform({ system: content, messages: [{ role: "user", content: "hi" }] });
+      assert.deepEqual((topOnly.messages as unknown[])[0], { role: "system", content: expected });
+    }
+  }
+  for (const content of [
+    "Legitimate system instruction",
+    "x".repeat(2000),
+    [{ type: "text", text: "Use JSON." }],
+  ]) {
+    const out = transform({ system: content, messages: [{ role: "system", content }] });
+    assert.deepEqual(out.system, content);
+    assert.deepEqual(out.messages, [{ role: "system", content }]);
+  }
+});
+
+test("International strips only function descriptions at the >=64KB UTF-8 boundary", () => {
+  const emptySize = new TextEncoder().encode(JSON.stringify([tool("")])).byteLength;
+  for (const bytes of [64 * 1024 - 1, 64 * 1024, 64 * 1024 + 1]) {
+    const input = { tools: [tool("x".repeat(bytes - emptySize))] };
+    const before = structuredClone(input);
+    const out = transform(input);
+    const result = (out.tools as ReturnType<typeof tool>[])[0].function;
+    assert.equal(Object.hasOwn(result, "description"), bytes < 64 * 1024);
+    assert.equal(result.name, "read_file");
+    assert.deepEqual(result.parameters, input.tools[0].function.parameters);
+    assert.deepEqual(input, before);
+  }
+  const mixed = {
+    tools: [tool("界".repeat(22000)), { type: "web_search", description: "built-in" }, null],
+  };
+  const out = transform(mixed);
+  assert.equal(
+    Object.hasOwn((out.tools as ReturnType<typeof tool>[])[0].function, "description"),
+    false
+  );
+  assert.deepEqual((out.tools as unknown[]).slice(1), mixed.tools.slice(1));
+});
+
+test("International maps 6004 and frequency limits to 429 with parsed reset timestamps", () => {
+  for (const [message, reset] of [
+    ["超出频率限制，请在2026-01-02 12:00:00 UTC+8重试", "2026-01-02T12:00:00+08:00"],
+    ["Frequency limit until 2026-01-02 12:00:00 UTC+00:00", "2026-01-02T12:00:00Z"],
+    ["frequency limit until 2026-01-02 12:00:00", "2026-01-02T12:00:00+08:00"],
+    ["Rate limit until 2026-01-02T12:00:00Z", "2026-01-02T12:00:00Z"],
+    ["frequency limit until 2026-01-02 12:00:00 UTC-5:30", "2026-01-02T12:00:00-05:30"],
+  ]) {
+    const parsed = executor.parseError(
+      jsonResponse({}, 400),
+      JSON.stringify({ code: 6004, msg: message })
+    );
+    assert.equal(parsed.status, 429);
+    assert.equal(parsed.message, message);
+    assert.equal(parsed.resetsAtMs, Date.parse(reset));
+  }
+  assert.deepEqual(executor.parseError(jsonResponse({}), '{"code":6004}'), {
+    status: 429,
+    message: "CodeBuddy frequency limit (6004)",
+    resetsAtMs: null,
+  });
+  assert.equal(
+    executor.parseError(jsonResponse({}, 400), '{"message":"frequency limit"}').status,
+    429
+  );
+  assert.equal(
+    executor.parseError(jsonResponse({}, 400), '{"error":{"code":"6004","message":"limited"}}')
+      .status,
+    429
+  );
+  assert.equal(executor.parseError(jsonResponse({}, 400), "invalid request").status, 400);
+});
+
+test("International sends normalized IDE wire requests and does not buffer successful SSE", async () => {
+  const upstream = new Response('data: {"choices":[]}\n\ndata: [DONE]\n\n', {
+    headers: { "Content-Type": "text/event-stream" },
+  });
+  globalThis.fetch = async (url, init) => {
+    assert.equal(url, REGISTRY["codebuddy-intl"].baseUrl);
+    const headers = new Headers(init?.headers);
+    assert.equal(headers.get("User-Agent"), "IDE/2.108.1 CodeBuddy/2.108.1");
+    assert.equal(headers.get("Authorization"), "Bearer test-access");
+    const body = JSON.parse(String(init?.body));
+    assert.equal(body.stream, true);
+    assert.deepEqual(body.messages, [
+      { role: "system", content: "You are CodeBuddy Code." },
+      { role: "user", content: [{ type: "text", text: "hi" }] },
+    ]);
+    return upstream;
+  };
+  const result = await executor.execute({
+    model: "glm-5.2",
+    body: { messages: [{ role: "user", content: "hi" }] },
+    stream: false,
+    credentials: { accessToken: "test-access" },
+    skipUpstreamRetry: true,
+  });
+  assert.ok(!(result instanceof Response));
+  assert.equal(result.response, upstream);
+  assert.equal(upstream.bodyUsed, false);
+});
+
+test("International retries sensitive-content once with compacted tools, including generic phrasing", async () => {
+  for (const message of ["抱歉，系统检测到敏感内容", "Request rejected due to sensitive content"]) {
+    const requests: Record<string, unknown>[] = [];
+    const input = {
+      tools: [tool("Read a local file.")],
+      messages: [{ role: "user", content: "read file" }],
+    };
+    const before = structuredClone(input);
+    globalThis.fetch = async (_url, init) => {
+      requests.push(JSON.parse(String(init?.body)));
+      return jsonResponse({ msg: message }, 400);
+    };
+    const result = await executor.execute({
+      model: "glm-5.2",
+      body: input,
+      stream: true,
+      credentials: { accessToken: "test-access" },
+      skipUpstreamRetry: true,
+    });
+    assert.equal(requests.length, 2, "sensitive rejection must be retried at most once");
+    assert.equal(
+      Object.hasOwn((requests[0].tools as ReturnType<typeof tool>[])[0].function, "description"),
+      true
+    );
+    assert.equal(
+      Object.hasOwn((requests[1].tools as ReturnType<typeof tool>[])[0].function, "description"),
+      false
+    );
+    assert.deepEqual(input, before);
+    assert.equal(result instanceof Response ? result.status : result.response.status, 400);
+  }
+});
+
+test("International does not retry unrelated or already-compacted sensitive rejections", async () => {
+  for (const [description, message] of [
+    ["x".repeat(70000), "sensitive content"],
+    ["short", "invalid model"],
+  ]) {
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls++;
+      return jsonResponse({ msg: message }, 400);
+    };
+    await executor.execute({
+      model: "glm-5.2",
+      body: { tools: [tool(description)] },
+      stream: true,
+      credentials: { accessToken: "test-access" },
+      skipUpstreamRetry: true,
+    });
+    assert.equal(calls, 1);
+  }
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return jsonResponse({ msg: "sensitive content" }, 400);
+  };
+  await executor.execute({
+    model: "glm-5.2",
+    body: { messages: [{ role: "user", content: "hi" }] },
+    stream: true,
+    credentials: { accessToken: "test-access" },
+    skipUpstreamRetry: true,
+  });
+  assert.equal(calls, 1);
+});
+
+test("International one-shot retry preserves refreshed bearer and accepts bare Response results", async (t) => {
+  let calls = 0;
+  t.mock.method(DefaultExecutor.prototype, "execute", async (input) => {
+    calls++;
+    if (calls === 1)
+      return {
+        response: jsonResponse({ msg: "sensitive content" }, 400),
+        headers: { authorization: "Bearer rotated-access" },
+        transformedBody: JSON.stringify(input.body),
+      };
+    assert.equal(input.credentials.accessToken, "rotated-access");
+    assert.equal(input.credentials.expiresAt, undefined);
+    assert.equal(Object.hasOwn(input.body.tools[0].function, "description"), false);
+    return new Response("data: [DONE]\n\n", { headers: { "Content-Type": "text/event-stream" } });
+  });
+  const result = await executor.execute({
+    model: "glm-5.2",
+    body: { tools: [tool("short")] },
+    stream: true,
+    credentials: { accessToken: "old-access", expiresAt: "2000-01-01" },
+  });
+  assert.ok(result instanceof Response);
+  assert.equal(calls, 2);
+});
+
+test("International exposes 6004 reset to chatCore via HTTP 429 and Retry-After", async () => {
+  const reset = new Date(Date.now() + 120000).toISOString().replace(/\.\d{3}Z$/, "Z");
+  for (const status of [200, 400, 429]) {
+    globalThis.fetch = async () =>
+      jsonResponse({ code: 6004, msg: `Frequency limit until ${reset}` }, status);
+    const result = await executor.execute({
+      model: "glm-5.2",
+      body: {},
+      stream: false,
+      credentials: { accessToken: "test-access" },
+      skipUpstreamRetry: true,
+    });
+    const response = result instanceof Response ? result : result.response;
+    assert.equal(response.status, 429);
+    const retry = Number(response.headers.get("Retry-After"));
+    assert.ok(retry >= 118 && retry <= 120);
+    const details = await parseUpstreamError(response, "codebuddy-intl");
+    assert.equal(details.statusCode, 429);
+    assert.equal(details.retryAfterMs, retry * 1000);
+    assert.match(details.message, /Frequency limit/);
+  }
+});
+
+test("International leaves successful JSON answers mentioning frequency limits unchanged", async () => {
+  const upstream = jsonResponse({
+    choices: [{ message: { content: "A frequency limit prevents overload." } }],
+  });
+  globalThis.fetch = async () => upstream;
+  const result = await executor.execute({
+    model: "glm-5.2",
+    body: {},
+    stream: false,
+    credentials: { accessToken: "test-access" },
+    skipUpstreamRetry: true,
+  });
+  assert.equal(result instanceof Response ? result : result.response, upstream);
 });
