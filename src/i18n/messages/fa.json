@@ -5585,6 +5585,7 @@
     "manualApiKey": "کلید API دستی",
     "addPat": "افزودن PAT",
     "experimentalOauth": "OAuth آزمایشی",
+    "oauthSignIn": "Sign in (OAuth)",
     "importAuth": "وارد کردن اطلاعات احراز هویت",
     "importGrokAuth": "وارد کردن اطلاعات احراز هویت Grok Build",
     "zedImportTitle": "وارد کردن از Zed Keychain",

@@ -5585,6 +5585,7 @@
     "manualApiKey": "手動 API キー",
     "addPat": "PAT を追加",
     "experimentalOauth": "実験的 OAuth",
+    "oauthSignIn": "Sign in (OAuth)",
     "importAuth": "認証情報をインポート",
     "importGrokAuth": "Grok Build 認証情報をインポート",
     "zedImportTitle": "Zed キーチェーンからインポート",

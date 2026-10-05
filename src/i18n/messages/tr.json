@@ -5585,6 +5585,7 @@
     "manualApiKey": "Manuel API anahtarı",
     "addPat": "PAT Ekle",
     "experimentalOauth": "Deneysel OAuth",
+    "oauthSignIn": "Sign in (OAuth)",
     "importAuth": "Kimlik doğrulamasını içe aktar",
     "importGrokAuth": "Grok Build kimlik doğrulamasını içe aktar",
     "zedImportTitle": "Zed Keychain'den içe aktar",

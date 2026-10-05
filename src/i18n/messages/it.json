@@ -5585,6 +5585,7 @@
     "manualApiKey": "Chiave API manuale",
     "addPat": "Aggiungi PAT",
     "experimentalOauth": "OAuth sperimentale",
+    "oauthSignIn": "Sign in (OAuth)",
     "importAuth": "Importa autenticazione",
     "importGrokAuth": "Importa autenticazione Grok Build",
     "zedImportTitle": "Importa da Zed Keychain",

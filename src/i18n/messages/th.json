@@ -5585,6 +5585,7 @@
     "manualApiKey": "คีย์ API แบบระบุเอง",
     "addPat": "เพิ่ม PAT",
     "experimentalOauth": "OAuth รุ่นทดลอง",
+    "oauthSignIn": "Sign in (OAuth)",
     "importAuth": "นำเข้าข้อมูลการยืนยันตัวตน",
     "importGrokAuth": "นำเข้าข้อมูลการยืนยันตัวตน Grok Build",
     "zedImportTitle": "นำเข้าจาก Zed Keychain",

@@ -5585,6 +5585,7 @@
     "manualApiKey": "Ключ API вручну",
     "addPat": "Додати PAT",
     "experimentalOauth": "Експериментальний OAuth",
+    "oauthSignIn": "Sign in (OAuth)",
     "importAuth": "Імпортувати автентифікацію",
     "importGrokAuth": "Імпортувати автентифікацію Grok Build",
     "zedImportTitle": "Імпортувати зі зв'язки ключів Zed",

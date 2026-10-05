@@ -5585,6 +5585,7 @@
     "manualApiKey": "Manwal na API key",
     "addPat": "Magdagdag ng PAT",
     "experimentalOauth": "Eksperimental na OAuth",
+    "oauthSignIn": "Sign in (OAuth)",
     "importAuth": "I-import ang auth",
     "importGrokAuth": "I-import ang Grok Build auth",
     "zedImportTitle": "I-import mula sa Zed Keychain",

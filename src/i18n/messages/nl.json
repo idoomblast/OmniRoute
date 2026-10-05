@@ -5585,6 +5585,7 @@
     "manualApiKey": "Handmatige API-sleutel",
     "addPat": "PAT toevoegen",
     "experimentalOauth": "Experimentele OAuth",
+    "oauthSignIn": "Sign in (OAuth)",
     "importAuth": "Authenticatie importeren",
     "importGrokAuth": "Grok Build-authenticatie importeren",
     "zedImportTitle": "Importeren uit Zed-sleutelhanger",

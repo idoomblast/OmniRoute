@@ -2,7 +2,7 @@
 
 // Phase 1t.6 extraction — Issue #3501
 import { Button } from "@/shared/components";
-import type { ProviderMessageTranslator } from "../providerPageHelpers";
+import { providerText, type ProviderMessageTranslator } from "../providerPageHelpers";
 
 interface CommandCodeAuthState {
   phase: string;
@@ -79,6 +79,22 @@ export default function EmptyConnectionsPlaceholder({
                 onClick={() => gateConnectionFlow(openApiKeyAddFlow)}
               >
                 Manual API key
+              </Button>
+            </>
+          ) : providerId === "codebuddy-cn" || providerId === "codebuddy-intl" ? (
+            <>
+              {/* Dual-auth: device-code OAuth + optional direct API key. Free-tier
+                  accounts cannot create dashboard API keys, so the OAuth sign-in
+                  must stay reachable next to the manual key path (9router parity). */}
+              <Button icon="lock" onClick={() => gateConnectionFlow(onOpenOAuthModal)}>
+                {providerText(t, "oauthSignIn", "Sign in (OAuth)")}
+              </Button>
+              <Button
+                variant="secondary"
+                icon="key"
+                onClick={() => gateConnectionFlow(openApiKeyAddFlow)}
+              >
+                {providerText(t, "manualApiKey", "Manual API key")}
               </Button>
             </>
           ) : (

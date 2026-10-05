@@ -5585,6 +5585,7 @@
     "manualApiKey": "Əl ilə API açarı",
     "addPat": "PAT əlavə et",
     "experimentalOauth": "Eksperimental OAuth",
+    "oauthSignIn": "Sign in (OAuth)",
     "importAuth": "Kimlik doğrulaması idxal et",
     "importGrokAuth": "Grok Build kimlik doğrulaması idxal et",
     "zedImportTitle": "Zed Keychain-dən idxal et",

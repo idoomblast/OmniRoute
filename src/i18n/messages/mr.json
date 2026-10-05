@@ -5585,6 +5585,7 @@
     "manualApiKey": "मॅन्युअल API की",
     "addPat": "PAT जोडा",
     "experimentalOauth": "प्रायोगिक OAuth",
+    "oauthSignIn": "Sign in (OAuth)",
     "importAuth": "Auth इम्पोर्ट करा",
     "importGrokAuth": "Grok Build auth इम्पोर्ट करा",
     "zedImportTitle": "Zed Keychain मधून इम्पोर्ट करा",

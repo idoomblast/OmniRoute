@@ -5585,6 +5585,7 @@
     "manualApiKey": "Cheie API manuală",
     "addPat": "Adăugare PAT",
     "experimentalOauth": "OAuth experimental",
+    "oauthSignIn": "Sign in (OAuth)",
     "importAuth": "Importare autentificare",
     "importGrokAuth": "Importare autentificare Grok Build",
     "zedImportTitle": "Importare din Zed Keychain",

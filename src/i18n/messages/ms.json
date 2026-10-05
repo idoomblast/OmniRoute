@@ -5585,6 +5585,7 @@
     "manualApiKey": "Kunci API manual",
     "addPat": "Tambah PAT",
     "experimentalOauth": "OAuth Eksperimental",
+    "oauthSignIn": "Sign in (OAuth)",
     "importAuth": "Import pengesahan",
     "importGrokAuth": "Import pengesahan Grok Build",
     "zedImportTitle": "Import daripada Rantai Kunci Zed",

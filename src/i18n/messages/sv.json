@@ -5585,6 +5585,7 @@
     "manualApiKey": "Manuell API-nyckel",
     "addPat": "Lägg till PAT",
     "experimentalOauth": "Experimentell OAuth",
+    "oauthSignIn": "Sign in (OAuth)",
     "importAuth": "Importera autentisering",
     "importGrokAuth": "Importera Grok Build-autentisering",
     "zedImportTitle": "Importera från Zed-nyckelring",

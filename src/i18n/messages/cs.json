@@ -5585,6 +5585,7 @@
     "manualApiKey": "Ruční klíč API",
     "addPat": "Přidat PAT",
     "experimentalOauth": "Experimentální OAuth",
+    "oauthSignIn": "Sign in (OAuth)",
     "importAuth": "Importovat ověření",
     "importGrokAuth": "Importovat ověření Grok Build",
     "zedImportTitle": "Importovat z klíčenky Zed",

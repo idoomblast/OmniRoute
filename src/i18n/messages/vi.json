@@ -5607,6 +5607,7 @@
     "manualApiKey": "Khóa API thủ công",
     "addPat": "Thêm PAT",
     "experimentalOauth": "OAuth thử nghiệm",
+    "oauthSignIn": "Sign in (OAuth)",
     "importAuth": "Nhập thông tin xác thực",
     "importGrokAuth": "Nhập thông tin xác thực Grok Build",
     "zedImportTitle": "Nhập từ chùm khóa Zed",

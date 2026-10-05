@@ -5585,6 +5585,7 @@
     "manualApiKey": "مفتاح API يدوي",
     "addPat": "إضافة PAT",
     "experimentalOauth": "OAuth تجريبي",
+    "oauthSignIn": "Sign in (OAuth)",
     "importAuth": "استيراد المصادقة",
     "importGrokAuth": "استيراد مصادقة Grok Build",
     "zedImportTitle": "الاستيراد من سلسلة مفاتيح Zed",

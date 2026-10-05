@@ -5607,6 +5607,7 @@
     "manualApiKey": "Ręczny klucz API",
     "addPat": "Dodaj PAT",
     "experimentalOauth": "Eksperymentalne OAuth",
+    "oauthSignIn": "Sign in (OAuth)",
     "importAuth": "Importuj uwierzytelnianie",
     "importGrokAuth": "Importuj uwierzytelnianie Grok Build",
     "zedImportTitle": "Importuj z pęku kluczy Zed",

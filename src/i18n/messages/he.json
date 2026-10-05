@@ -5585,6 +5585,7 @@
     "manualApiKey": "מפתח API ידני",
     "addPat": "הוסף PAT",
     "experimentalOauth": "OAuth ניסיוני",
+    "oauthSignIn": "Sign in (OAuth)",
     "importAuth": "ייבוא אימות",
     "importGrokAuth": "ייבוא אימות Grok Build",
     "zedImportTitle": "ייבוא מ-Zed Keychain",

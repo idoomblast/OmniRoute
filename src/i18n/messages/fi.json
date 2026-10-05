@@ -5585,6 +5585,7 @@
     "manualApiKey": "Manuaalinen API-avain",
     "addPat": "Lisää PAT",
     "experimentalOauth": "Kokeellinen OAuth",
+    "oauthSignIn": "Sign in (OAuth)",
     "importAuth": "Tuo tunnistautumistiedot",
     "importGrokAuth": "Tuo Grok Build -tunnistautumistiedot",
     "zedImportTitle": "Tuo Zed-avainnipusta",

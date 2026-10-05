@@ -5585,6 +5585,7 @@
     "manualApiKey": "Manuálny API kľúč",
     "addPat": "Pridať PAT",
     "experimentalOauth": "Experimentálne OAuth",
+    "oauthSignIn": "Sign in (OAuth)",
     "importAuth": "Importovať overenie",
     "importGrokAuth": "Importovať overenie Grok Build",
     "zedImportTitle": "Importovať z kľúčenky Zed",

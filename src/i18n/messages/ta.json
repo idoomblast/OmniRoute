@@ -5585,6 +5585,7 @@
     "manualApiKey": "கைமுறை API கீ",
     "addPat": "PAT-ஐச் சேர்க்கவும்",
     "experimentalOauth": "பரிசோதனைக்குரிய OAuth",
+    "oauthSignIn": "Sign in (OAuth)",
     "importAuth": "அங்கீகாரத்தை இறக்குமதி செய்யவும்",
     "importGrokAuth": "Grok Build அங்கீகாரத்தை இறக்குமதி செய்யவும்",
     "zedImportTitle": "Zed கீசெயினிலிருந்து இறக்குமதி செய்யவும்",

@@ -5585,6 +5585,7 @@
     "manualApiKey": "수동 API 키",
     "addPat": "PAT 추가",
     "experimentalOauth": "실험적 OAuth",
+    "oauthSignIn": "Sign in (OAuth)",
     "importAuth": "인증 가져오기",
     "importGrokAuth": "Grok Build 인증 가져오기",
     "zedImportTitle": "Zed 키체인에서 가져오기",

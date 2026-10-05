@@ -5585,6 +5585,7 @@
     "manualApiKey": "Ufunguo wa API wa mwongozo",
     "addPat": "Ongeza PAT",
     "experimentalOauth": "OAuth ya Kijaribio",
+    "oauthSignIn": "Sign in (OAuth)",
     "importAuth": "Ingiza uthibitishaji",
     "importGrokAuth": "Ingiza uthibitishaji wa Grok Build",
     "zedImportTitle": "Ingiza kutoka kwa Zed Keychain",

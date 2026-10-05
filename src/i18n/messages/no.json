@@ -5585,6 +5585,7 @@
     "manualApiKey": "Manuell API-nøkkel",
     "addPat": "Legg til PAT",
     "experimentalOauth": "Eksperimentell OAuth",
+    "oauthSignIn": "Sign in (OAuth)",
     "importAuth": "Importer autentisering",
     "importGrokAuth": "Importer Grok Build-autentisering",
     "zedImportTitle": "Importer fra Zed-nøkkelring",

@@ -5585,6 +5585,7 @@
     "manualApiKey": "手動 API 金鑰",
     "addPat": "新增 PAT",
     "experimentalOauth": "實驗性 OAuth",
+    "oauthSignIn": "Sign in (OAuth)",
     "importAuth": "匯入驗證",
     "importGrokAuth": "匯入 Grok Build 驗證",
     "zedImportTitle": "從 Zed 鑰匙圈匯入",

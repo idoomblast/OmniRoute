@@ -5585,6 +5585,7 @@
     "manualApiKey": "Kézi API-kulcs",
     "addPat": "PAT hozzáadása",
     "experimentalOauth": "Kísérleti OAuth",
+    "oauthSignIn": "Sign in (OAuth)",
     "importAuth": "Hitelesítés importálása",
     "importGrokAuth": "Grok Build hitelesítés importálása",
     "zedImportTitle": "Importálás a Zed kulcstartóból",
