@@ -40,6 +40,7 @@ import {
 } from "./tokenRefresh/circuitBreaker.ts";
 import { refreshWindsurfToken } from "./tokenRefresh/providers/windsurf.ts";
 import { refreshCodebuddyCnToken } from "./tokenRefresh/providers/codebuddyCn.ts";
+import { refreshCodebuddyIntlToken } from "./tokenRefresh/providers/codebuddyIntl.ts";
 import { refreshClineToken } from "./tokenRefresh/providers/cline.ts";
 import { refreshKimiCodingToken } from "./tokenRefresh/providers/kimiCoding.ts";
 import { refreshGitLabDuoToken } from "./tokenRefresh/providers/gitlabDuo.ts";
@@ -294,10 +295,7 @@ async function _getAccessTokenInternal(provider, credentials, log, proxyConfig: 
         !(credentials.projectId || credentials.providerSpecificData?.projectId)
       ) {
         try {
-          const discovered = await ensureAntigravityProjectAssigned(
-            result.accessToken,
-            fetch
-          );
+          const discovered = await ensureAntigravityProjectAssigned(result.accessToken, fetch);
           if (discovered) {
             result.projectId = discovered;
             result.providerSpecificData = {
@@ -317,7 +315,8 @@ async function _getAccessTokenInternal(provider, credentials, log, proxyConfig: 
             });
           }
         } catch (discoveryError) {
-          const msg = discoveryError instanceof Error ? discoveryError.message : String(discoveryError);
+          const msg =
+            discoveryError instanceof Error ? discoveryError.message : String(discoveryError);
           log?.warn?.("TOKEN", `Antigravity projectId discovery failed: ${msg}`);
         }
       }
@@ -378,6 +377,9 @@ async function _getAccessTokenInternal(provider, credentials, log, proxyConfig: 
     case "codebuddy-cn":
       return await refreshCodebuddyCnToken(credentials.refreshToken, log, proxyConfig);
 
+    case "codebuddy-intl":
+      return await refreshCodebuddyIntlToken(credentials.refreshToken, log, proxyConfig);
+
     default:
       // Fallback to generic OAuth refresh for unknown providers
       return refreshAccessToken(provider, credentials.refreshToken, credentials, log, proxyConfig);
@@ -409,6 +411,7 @@ export function supportsTokenRefresh(provider) {
     // explicit set (same idea as not listing non-refresh local-CLI providers).
     "gitlab-duo",
     "codebuddy-cn",
+    "codebuddy-intl",
   ]);
   if (explicitlySupported.has(provider)) return true;
   const config = PROVIDERS[provider];

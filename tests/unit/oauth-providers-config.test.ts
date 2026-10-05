@@ -28,6 +28,7 @@ const {
   CLINE_CONFIG,
   CODEX_CONFIG,
   CODEBUDDY_CN_CONFIG,
+  CODEBUDDY_INTL_CONFIG,
   ZED_CONFIG,
   CURSOR_CONFIG,
   GHE_COPILOT_CONFIG,
@@ -71,6 +72,7 @@ const EXPECTED_PROVIDER_KEYS = [
   "grok-cli",
   "xai-oauth",
   "codebuddy-cn",
+  "codebuddy-intl",
   "zed",
   "zed-hosted",
 ];
@@ -104,6 +106,7 @@ const EXPECTED_CONFIG_BY_PROVIDER = {
   "grok-cli": GROK_BUILD_OAUTH_CONFIG,
   "xai-oauth": XAI_OAUTH_CONFIG,
   "codebuddy-cn": CODEBUDDY_CN_CONFIG,
+  "codebuddy-intl": CODEBUDDY_INTL_CONFIG,
   zed: ZED_CONFIG,
   "zed-hosted": ZED_HOSTED_CONFIG,
 };
@@ -548,14 +551,15 @@ test("Antigravity runs mocked browser OAuth exchanges and post-exchange enrichme
   useFetchSequence([
     jsonResponse({ access_token: "anti-access", refresh_token: "anti-refresh", expires_in: 7200 }),
     jsonResponse({ email: "anti@example.com" }),
-    (_url, init: any = {}) => {
+    (_url, init: RequestInit = {}) => {
+      const headers = new Headers(init.headers);
       assert.equal(init.method, "POST");
-      assert.equal(init.headers.Authorization, "Bearer anti-access");
+      assert.equal(headers.get("Authorization"), "Bearer anti-access");
       assert.match(
-        init.headers["User-Agent"],
+        headers.get("User-Agent")!,
         /^antigravity\/2\.8\.1 [^ ]+\/[^ ]+ google-api-nodejs-client\/10\.3\.0$/
       );
-      assert.equal(init.headers["X-Goog-Api-Client"], "gl-node/22.21.1");
+      assert.equal(headers.get("X-Goog-Api-Client"), "gl-node/22.21.1");
       assert.deepEqual(
         JSON.parse(String(init.body)).metadata,
         getAntigravityLoadCodeAssistMetadata()
@@ -566,14 +570,15 @@ test("Antigravity runs mocked browser OAuth exchanges and post-exchange enrichme
         allowedTiers: [{ id: "tier-default", isDefault: true }],
       });
     },
-    (_url, init: any = {}) => {
+    (_url, init: RequestInit = {}) => {
+      const headers = new Headers(init.headers);
       assert.equal(init.method, "POST");
-      assert.equal(init.headers.Authorization, "Bearer anti-access");
+      assert.equal(headers.get("Authorization"), "Bearer anti-access");
       assert.match(
-        init.headers["User-Agent"],
+        headers.get("User-Agent")!,
         /^antigravity\/2\.8\.1 [^ ]+\/[^ ]+ google-api-nodejs-client\/10\.3\.0$/
       );
-      assert.equal(init.headers["X-Goog-Api-Client"], "gl-node/22.21.1");
+      assert.equal(headers.get("X-Goog-Api-Client"), "gl-node/22.21.1");
       assert.deepEqual(
         JSON.parse(String(init.body)).metadata,
         getAntigravityLoadCodeAssistMetadata()

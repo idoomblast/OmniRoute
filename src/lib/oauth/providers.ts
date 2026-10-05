@@ -10,6 +10,7 @@
 import { generatePKCE, generateState } from "./utils/pkce";
 import { PROVIDERS } from "./providers/index";
 import { resolvePublicCred } from "@omniroute/open-sse/utils/publicCreds.ts";
+import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
 
 const GOOGLE_BROWSER_PROVIDERS = new Set(["antigravity", "agy"]);
 
@@ -298,6 +299,19 @@ export async function pollForToken(providerName, deviceCode, codeVerifier, extra
         };
       }
     }
+  }
+
+  // The cloned International module retains CN's {ok:false,data:{code,msg}} wire shape.
+  // Adapt only this new provider; leave the existing CN/helper behavior unchanged.
+  if (providerName === "codebuddy-intl") {
+    if (result.data.code === 11217) {
+      return { success: false, error: "authorization_pending", pending: true };
+    }
+    return {
+      success: false,
+      error: result.data.error || String(result.data.code ?? "request_failed"),
+      errorDescription: sanitizeErrorMessage(result.data.msg || result.data.error_description),
+    };
   }
 
   return {

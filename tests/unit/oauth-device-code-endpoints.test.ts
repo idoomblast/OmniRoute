@@ -15,11 +15,13 @@ import { dirname, resolve } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 const read = (p: string) => readFileSync(resolve(here, "../..", p), "utf8");
 
-test("codebuddy-cn device-code sends platform as a query param (not body-only)", () => {
-  const cb = read("src/lib/oauth/providers/codebuddy-cn.ts");
-  assert.match(
-    cb,
-    /\?platform=\$\{encodeURIComponent\(config\.platform\)\}/,
-    "platform query param"
-  );
-});
+for (const provider of ["codebuddy-cn", "codebuddy-intl"]) {
+  test(`${provider} device-code sends platform as a query param (not body-only)`, () => {
+    const cb = read(`src/lib/oauth/providers/${provider}.ts`);
+    assert.match(
+      cb,
+      /\?platform=\$\{encodeURIComponent\(config\.platform\)\}/,
+      "platform query param"
+    );
+  });
+}

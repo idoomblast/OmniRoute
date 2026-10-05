@@ -129,6 +129,11 @@ export const OAUTH_TEST_CONFIG = {
     checkExpiry: true,
     refreshable: true,
   },
+  "codebuddy-intl": {
+    // Device-flow token presence/expiry and refresh; authenticated chat is not yet verified.
+    checkExpiry: true,
+    refreshable: true,
+  },
   "devin-cli": {
     // Same gap as grok-cli #7610: absent from this table, so "Test Connection"
     // always fell through to "Provider test not supported" and left a working
