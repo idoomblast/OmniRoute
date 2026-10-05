@@ -8,8 +8,10 @@
 // These tests pin both entry points on the connections toolbar and the empty
 // placeholder, mirroring 9router's dual-auth presentation, and pin the
 // surrounding control providers (opencode, qoder, OAuth-only gemini) on BOTH
-// components so the dual-auth branch cannot hide (or leak into) neighbouring
-// entry flows.
+// components. Every control case asserts the COMPLETE connection-entry
+// inventory (toolbar utilities excluded) plus full callback counts after each
+// click, so the dual-auth branch cannot hide (or leak into) neighbouring entry
+// flows.
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -41,6 +43,30 @@ function buttonByText(container: HTMLElement, text: string) {
 
 function countByText(container: HTMLElement, text: string): number {
   return buttons(container).filter((button) => (button.textContent || "").includes(text)).length;
+}
+
+// Toolbar decorations that are never connection entries: the provider-proxy
+// utility (icon "vpn_lock" + t("providerProxy") → text "vpn_lockproviderProxy"
+// with unconfigured proxyConfig) and the distribute-proxies helper rendered
+// once connections exist ("swap_horizDistribute Proxies"). The empty
+// placeholder renders no utility buttons at all.
+const NON_ENTRY_BUTTON_TEXTS = ["providerProxy", "Distribute Proxies"];
+
+function entryButtons(container: HTMLElement): HTMLButtonElement[] {
+  return buttons(container).filter(
+    (button) => !NON_ENTRY_BUTTON_TEXTS.some((text) => (button.textContent || "").includes(text))
+  );
+}
+
+// Complete connection-entry inventory: exactly one entry button per expected
+// label, and no other entry button beyond them.
+function expectEntryInventory(container: HTMLElement, labels: string[]) {
+  const entries = entryButtons(container);
+  expect(entries).toHaveLength(labels.length);
+  for (const label of labels) {
+    const matches = entries.filter((button) => (button.textContent || "").includes(label));
+    expect(matches).toHaveLength(1);
+  }
 }
 
 function clickInAct(button: Element | undefined) {
@@ -145,15 +171,19 @@ describe("codebuddy dual-auth entry points", () => {
     it(`${providerId}: toolbar keeps OAuth sign-in reachable next to manual API key (no connections)`, () => {
       const onOpenOAuthModal = vi.fn();
       const openApiKeyAddFlow = vi.fn();
+      const openPrimaryAddFlow = vi.fn();
       const container = renderComponent(
         <ConnectionsHeaderToolbar
-          {...toolbarProps({ providerId, onOpenOAuthModal, openApiKeyAddFlow })}
+          {...toolbarProps({
+            providerId,
+            onOpenOAuthModal,
+            openApiKeyAddFlow,
+            openPrimaryAddFlow,
+          })}
         />
       );
 
-      expect(countByText(container, "Sign in (OAuth)")).toBe(1);
-      expect(countByText(container, "Manual API key")).toBe(1);
-      expect(countByText(container, "Add PAT")).toBe(0);
+      expectEntryInventory(container, ["Sign in (OAuth)", "Manual API key"]);
 
       const oauthButton = buttonByText(container, "Sign in (OAuth)");
       const keyButton = buttonByText(container, "Manual API key");
@@ -161,15 +191,18 @@ describe("codebuddy dual-auth entry points", () => {
       clickInAct(oauthButton);
       expect(onOpenOAuthModal).toHaveBeenCalledTimes(1);
       expect(openApiKeyAddFlow).not.toHaveBeenCalled();
+      expect(openPrimaryAddFlow).not.toHaveBeenCalled();
 
       clickInAct(keyButton);
       expect(openApiKeyAddFlow).toHaveBeenCalledTimes(1);
       expect(onOpenOAuthModal).toHaveBeenCalledTimes(1);
+      expect(openPrimaryAddFlow).not.toHaveBeenCalled();
     });
 
     it(`${providerId}: toolbar keeps both entry points with an existing connection`, () => {
       const onOpenOAuthModal = vi.fn();
       const openApiKeyAddFlow = vi.fn();
+      const openPrimaryAddFlow = vi.fn();
       const container = renderComponent(
         <ConnectionsHeaderToolbar
           {...toolbarProps({
@@ -177,42 +210,51 @@ describe("codebuddy dual-auth entry points", () => {
             connections: [{ id: "conn-1" }],
             onOpenOAuthModal,
             openApiKeyAddFlow,
+            openPrimaryAddFlow,
           })}
         />
       );
 
-      expect(countByText(container, "Sign in (OAuth)")).toBe(1);
-      expect(countByText(container, "Manual API key")).toBe(1);
+      expectEntryInventory(container, ["Sign in (OAuth)", "Manual API key"]);
 
       clickInAct(buttonByText(container, "Sign in (OAuth)"));
       expect(onOpenOAuthModal).toHaveBeenCalledTimes(1);
       expect(openApiKeyAddFlow).not.toHaveBeenCalled();
+      expect(openPrimaryAddFlow).not.toHaveBeenCalled();
 
       clickInAct(buttonByText(container, "Manual API key"));
       expect(openApiKeyAddFlow).toHaveBeenCalledTimes(1);
       expect(onOpenOAuthModal).toHaveBeenCalledTimes(1);
+      expect(openPrimaryAddFlow).not.toHaveBeenCalled();
     });
 
     it(`${providerId}: empty placeholder keeps OAuth sign-in reachable and manual-key dispatch separate`, () => {
       const onOpenOAuthModal = vi.fn();
       const openApiKeyAddFlow = vi.fn();
+      const openPrimaryAddFlow = vi.fn();
       const container = renderComponent(
         <EmptyConnectionsPlaceholder
-          {...placeholderProps({ providerId, onOpenOAuthModal, openApiKeyAddFlow })}
+          {...placeholderProps({
+            providerId,
+            onOpenOAuthModal,
+            openApiKeyAddFlow,
+            openPrimaryAddFlow,
+          })}
         />
       );
 
-      expect(countByText(container, "Sign in (OAuth)")).toBe(1);
-      expect(countByText(container, "Manual API key")).toBe(1);
+      expectEntryInventory(container, ["Sign in (OAuth)", "Manual API key"]);
 
       clickInAct(buttonByText(container, "Sign in (OAuth)"));
       expect(onOpenOAuthModal).toHaveBeenCalledTimes(1);
       expect(openApiKeyAddFlow).not.toHaveBeenCalled();
+      expect(openPrimaryAddFlow).not.toHaveBeenCalled();
 
       // Manual-key click must fire ONLY the API-key callback (separation).
       clickInAct(buttonByText(container, "Manual API key"));
       expect(openApiKeyAddFlow).toHaveBeenCalledTimes(1);
       expect(onOpenOAuthModal).toHaveBeenCalledTimes(1);
+      expect(openPrimaryAddFlow).not.toHaveBeenCalled();
     });
   }
 
@@ -231,7 +273,7 @@ describe("codebuddy dual-auth entry points", () => {
       />
     );
 
-    expect(countByText(container, "Add PAT")).toBe(1);
+    expectEntryInventory(container, ["Add PAT"]);
     expect(countByText(container, "Sign in (OAuth)")).toBe(0);
     expect(countByText(container, "Manual API key")).toBe(0);
     expect(countByText(container, "Experimental OAuth")).toBe(0);
@@ -259,9 +301,10 @@ describe("codebuddy dual-auth entry points", () => {
       />
     );
 
-    expect(countByText(container, "Add PAT")).toBe(1);
+    expectEntryInventory(container, ["Add PAT"]);
     expect(countByText(container, "Sign in (OAuth)")).toBe(0);
     expect(countByText(container, "Manual API key")).toBe(0);
+    expect(countByText(container, "Experimental OAuth")).toBe(0);
 
     clickInAct(buttonByText(container, "Add PAT"));
     expect(openPrimaryAddFlow).toHaveBeenCalledTimes(1);
@@ -284,16 +327,17 @@ describe("codebuddy dual-auth entry points", () => {
       />
     );
 
-    expect(countByText(container, "Add PAT")).toBe(1);
-    expect(countByText(container, "Experimental OAuth")).toBe(1);
+    expectEntryInventory(container, ["Add PAT", "Experimental OAuth"]);
     expect(countByText(container, "Sign in (OAuth)")).toBe(0);
     expect(countByText(container, "Manual API key")).toBe(0);
 
     clickInAct(buttonByText(container, "Add PAT"));
     expect(openPrimaryAddFlow).toHaveBeenCalledTimes(1);
     expect(onOpenOAuthModal).not.toHaveBeenCalled();
+    expect(openApiKeyAddFlow).not.toHaveBeenCalled();
 
     clickInAct(buttonByText(container, "Experimental OAuth"));
+    expect(openPrimaryAddFlow).toHaveBeenCalledTimes(1);
     expect(onOpenOAuthModal).toHaveBeenCalledTimes(1);
     expect(openApiKeyAddFlow).not.toHaveBeenCalled();
   });
@@ -315,13 +359,17 @@ describe("codebuddy dual-auth entry points", () => {
       />
     );
 
-    expect(countByText(container, "Add PAT")).toBe(1);
-    expect(countByText(container, "Experimental OAuth")).toBe(1);
+    expectEntryInventory(container, ["Add PAT", "Experimental OAuth"]);
+    expect(countByText(container, "Sign in (OAuth)")).toBe(0);
+    expect(countByText(container, "Manual API key")).toBe(0);
 
     clickInAct(buttonByText(container, "Add PAT"));
     expect(openPrimaryAddFlow).toHaveBeenCalledTimes(1);
+    expect(onOpenOAuthModal).not.toHaveBeenCalled();
+    expect(openApiKeyAddFlow).not.toHaveBeenCalled();
 
     clickInAct(buttonByText(container, "Experimental OAuth"));
+    expect(openPrimaryAddFlow).toHaveBeenCalledTimes(1);
     expect(onOpenOAuthModal).toHaveBeenCalledTimes(1);
     expect(openApiKeyAddFlow).not.toHaveBeenCalled();
   });
@@ -343,15 +391,15 @@ describe("codebuddy dual-auth entry points", () => {
       />
     );
 
-    // The single primary entry uses t("add"); with the passthrough translator
-    // plus its material-icon span the normalized text is "addadd".
-    const entries = buttons(container).filter(
-      (button) => (button.textContent || "").replace(/\s+/g, "") === "addadd"
-    );
+    // Complete inventory: exactly one connection-entry button; its label is the
+    // icon span "add" + t("add") passthrough → normalized "addadd".
+    const entries = entryButtons(container);
     expect(entries).toHaveLength(1);
+    expect((entries[0].textContent || "").replace(/\s+/g, "")).toBe("addadd");
     expect(countByText(container, "Add PAT")).toBe(0);
     expect(countByText(container, "Sign in (OAuth)")).toBe(0);
     expect(countByText(container, "Manual API key")).toBe(0);
+    expect(countByText(container, "Experimental OAuth")).toBe(0);
 
     clickInAct(entries[0]);
     expect(openPrimaryAddFlow).toHaveBeenCalledTimes(1);
@@ -376,12 +424,17 @@ describe("codebuddy dual-auth entry points", () => {
       />
     );
 
-    expect(countByText(container, "addConnection")).toBe(1);
+    // Complete inventory: exactly one connection-entry button ("add" icon +
+    // t("addConnection") → normalized "addaddConnection").
+    const entries = entryButtons(container);
+    expect(entries).toHaveLength(1);
+    expect((entries[0].textContent || "").replace(/\s+/g, "")).toBe("addaddConnection");
     expect(countByText(container, "Add PAT")).toBe(0);
     expect(countByText(container, "Sign in (OAuth)")).toBe(0);
     expect(countByText(container, "Manual API key")).toBe(0);
+    expect(countByText(container, "Experimental OAuth")).toBe(0);
 
-    clickInAct(buttonByText(container, "addConnection"));
+    clickInAct(entries[0]);
     expect(openPrimaryAddFlow).toHaveBeenCalledTimes(1);
     expect(openApiKeyAddFlow).not.toHaveBeenCalled();
     expect(onOpenOAuthModal).not.toHaveBeenCalled();
