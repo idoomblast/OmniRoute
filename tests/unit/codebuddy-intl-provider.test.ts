@@ -13,6 +13,12 @@ import { refreshCodebuddyIntlToken } from "../../open-sse/services/tokenRefresh/
 import { getAccessToken, supportsTokenRefresh } from "../../open-sse/services/tokenRefresh.ts";
 import { REGISTRY, generateModels } from "../../open-sse/config/providerRegistry.ts";
 import { PROVIDER_ID_TO_ALIAS } from "../../open-sse/config/providerModels.ts";
+import {
+  OAUTH_PROVIDERS as DASHBOARD_OAUTH_PROVIDERS,
+  resolveProviderId,
+  supportsApiKeyOnFreeProvider,
+} from "../../src/shared/constants/providers.ts";
+import { connectionMatchesProviderCard } from "../../src/app/(dashboard)/dashboard/providers/providerPageUtils.ts";
 
 const originalFetch = globalThis.fetch;
 const config = CODEBUDDY_INTL_CONFIG;
@@ -108,6 +114,48 @@ test("International OAuth config and device-flow registrations use the .ai IDE e
     read("src/app/api/providers/[id]/test/oauthTestConfig.ts"),
     /"codebuddy-intl": \{[^}]*checkExpiry: true,[^}]*refreshable: true/
   );
+});
+
+test("International dashboard uses device login and counts OAuth and API-key connections on one card", () => {
+  const provider = DASHBOARD_OAUTH_PROVIDERS["codebuddy-intl"];
+  assert.deepEqual(provider, {
+    id: "codebuddy-intl",
+    alias: "cbai",
+    name: "CodeBuddy International",
+    icon: "smart_toy",
+    color: "#006EFF",
+    textIcon: "CB",
+    website: "https://www.codebuddy.ai",
+    subscriptionRisk: true,
+    riskNoticeVariant: "oauth",
+    authHint:
+      "CodeBuddy International (www.codebuddy.ai). Sign in via the official IDE device-code flow, or paste a direct API key (sent as Authorization: Bearer). Catalog: GLM / Kimi / MiniMax / DeepSeek / Hunyuan.",
+  });
+  assert.equal(resolveProviderId("cbai"), "codebuddy-intl");
+  assert.equal(supportsApiKeyOnFreeProvider("codebuddy-intl"), true);
+  for (const authType of ["oauth", "apikey", "api_key"]) {
+    assert.equal(
+      connectionMatchesProviderCard(
+        { provider: "codebuddy-intl", authType },
+        "codebuddy-intl",
+        "oauth"
+      ),
+      true
+    );
+  }
+  assert.equal(
+    connectionMatchesProviderCard(
+      { provider: "codebuddy-cn", authType: "oauth" },
+      "codebuddy-intl",
+      "oauth"
+    ),
+    false
+  );
+  assert.match(
+    read("src/shared/components/OAuthModal.tsx"),
+    /DEVICE_CODE_PROVIDERS = new Set\(\[[\s\S]*?"codebuddy-intl"/
+  );
+  assert.match(read("src/shared/components/lobeProviderIcons.ts"), /"codebuddy-intl": "Tencent"/);
 });
 
 test("International device state request returns the browser authUrl and CN-compatible shape", async () => {
