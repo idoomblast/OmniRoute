@@ -11,6 +11,8 @@ import OAUTH_PROVIDERS from "../../src/lib/oauth/providers/index.ts";
 import { pollForToken } from "../../src/lib/oauth/providers.ts";
 import { refreshCodebuddyIntlToken } from "../../open-sse/services/tokenRefresh/providers/codebuddyIntl.ts";
 import { getAccessToken, supportsTokenRefresh } from "../../open-sse/services/tokenRefresh.ts";
+import { REGISTRY, generateModels } from "../../open-sse/config/providerRegistry.ts";
+import { PROVIDER_ID_TO_ALIAS } from "../../open-sse/config/providerModels.ts";
 
 const originalFetch = globalThis.fetch;
 const config = CODEBUDDY_INTL_CONFIG;
@@ -20,9 +22,68 @@ const jsonResponse = (body: unknown, status = 200) =>
     headers: { "Content-Type": "application/json" },
   });
 const read = (path: string) => readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
+const modelIds = [
+  "glm-5.2",
+  "glm-5.1",
+  "glm-5.0",
+  "glm-5.0-turbo",
+  "glm-5v-turbo",
+  "glm-4.7",
+  "minimax-m3",
+  "minimax-m2.7",
+  "kimi-k2.7",
+  "kimi-k2.6",
+  "kimi-k2.5",
+  "hy3-preview",
+  "deepseek-v4-pro",
+  "deepseek-v4.1-flash",
+  "deepseek-v3-2-volc",
+];
 
 test.afterEach(() => {
   globalThis.fetch = originalFetch;
+});
+
+test("International registry exposes the .ai IDE gateway, cbai alias, and 15 CN-metadata models", () => {
+  const provider = REGISTRY["codebuddy-intl"];
+  assert.equal(provider.id, "codebuddy-intl");
+  assert.equal(provider.alias, "cbai");
+  assert.equal(provider.executor, "codebuddy-intl");
+  assert.equal(provider.format, "openai");
+  assert.equal(provider.authType, "oauth");
+  assert.equal(provider.authHeader, "bearer");
+  assert.equal(provider.forceStream, true);
+  assert.equal(provider.baseUrl, "https://www.codebuddy.ai/v2/chat/completions");
+  assert.deepEqual(provider.headers, {
+    "User-Agent": "IDE/2.108.1 CodeBuddy/2.108.1",
+    "X-Product": "SaaS",
+    "X-IDE-Type": "IDE",
+    "X-IDE-Name": "IDE",
+    "x-requested-with": "XMLHttpRequest",
+    "x-codebuddy-request": "1",
+  });
+  assert.equal(PROVIDER_ID_TO_ALIAS["codebuddy-intl"], "cbai");
+  assert.deepEqual(
+    generateModels().cbai.map((model) => model.id),
+    modelIds
+  );
+  assert.deepEqual(
+    provider.models.map((model) => model.id),
+    modelIds
+  );
+  for (const model of provider.models) {
+    const cnId = model.id === "deepseek-v4.1-flash" ? "deepseek-v4-flash" : model.id;
+    const cn = REGISTRY["codebuddy-cn"].models.find((entry) => entry.id === cnId);
+    assert.ok(cn, cnId);
+    for (const field of [
+      "contextLength",
+      "maxOutputTokens",
+      "supportsReasoning",
+      "supportsVision",
+    ] as const) {
+      assert.equal(model[field], cn[field], `${model.id}.${field}`);
+    }
+  }
 });
 
 test("International OAuth config and device-flow registrations use the .ai IDE endpoints", () => {
