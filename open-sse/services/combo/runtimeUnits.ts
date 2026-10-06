@@ -1,6 +1,7 @@
 // Nested combo runtime unit execution — see combo.ts for integration.
 import { errorResponse } from "../../utils/error.ts";
 import { recordComboRequest } from "../comboMetrics.ts";
+import { resolveReasoningBufferedMaxTokens, toPositiveInteger } from "../reasoningTokenBuffer.ts";
 import { resolveDelayMs } from "./comboPredicates.ts";
 import { validateResponseQuality, releaseQualityClone } from "./validateQuality.ts";
 import type { ResponseValidationConfig } from "./responseValidation.ts";
@@ -182,6 +183,7 @@ export async function executeRuntimeUnitCombo(args: {
 }): Promise<RuntimeUnitExecutionResult> {
   const maxRetries = Number(args.config.maxRetries ?? 1);
   const retryDelayMs = resolveDelayMs(args.config.retryDelayMs, 2000);
+  const reasoningTokenBufferEnabled = args.config.reasoningTokenBufferEnabled !== false;
   const orderedUnits = orderUnitsForStrategy(args.strategy, args.units);
   const clientRequestedStream = args.body?.stream === true;
   const startTime = Date.now();
@@ -204,8 +206,34 @@ export async function executeRuntimeUnitCombo(args: {
         "COMBO",
         `Trying ${unit.kind} ${unitDisplayName(unit)}${retry > 0 ? ` (retry ${retry})` : ""}`
       );
+      // Issue #3587 / #7847 parity with the normal target loop and the round-robin
+      // handler: UNCONDITIONAL per-attempt copy-on-write, so a budget buffered for
+      // one unit can never leak into the next or into the caller's body, plus the
+      // reasoning-token buffer for direct model units. Combo-ref units stay black
+      // boxes — their own combos buffer their inner targets.
+      const attemptBody = { ...args.body } as Record<string, unknown>;
+      if (unit.kind === "model") {
+        const currentMaxTokens = toPositiveInteger(attemptBody.max_tokens);
+        const bufferedMaxTokens = resolveReasoningBufferedMaxTokens(
+          unit.modelStr,
+          attemptBody.max_tokens,
+          { enabled: reasoningTokenBufferEnabled }
+        );
+        if (
+          currentMaxTokens !== null &&
+          bufferedMaxTokens !== null &&
+          bufferedMaxTokens !== currentMaxTokens
+        ) {
+          // Safe to write in place: attemptBody is the per-attempt copy above.
+          attemptBody.max_tokens = bufferedMaxTokens;
+          args.log.info(
+            "COMBO",
+            `Reasoning model ${unit.modelStr}: adjusted max_tokens ${currentMaxTokens} -> ${bufferedMaxTokens}`
+          );
+        }
+      }
       const response = await executeRuntimeUnit({
-        body: args.body,
+        body: attemptBody,
         unit,
         allCombos: args.allCombos,
         handleSingleModel: args.handleSingleModel,
