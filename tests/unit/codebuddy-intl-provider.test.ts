@@ -37,28 +37,214 @@ const jsonResponse = (body: unknown, status = 200) =>
   });
 const read = (path: string) => readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
 const modelIds = [
-  "glm-5.2",
-  "glm-5.1",
-  "glm-5.0",
-  "glm-5.0-turbo",
-  "glm-5v-turbo",
-  "glm-4.7",
-  "minimax-m3",
-  "minimax-m2.7",
-  "kimi-k2.7",
-  "kimi-k2.6",
-  "kimi-k2.5",
-  "hy3-preview",
-  "deepseek-v4-pro",
+  "default-model",
+  "fast-model",
+  "balanced-model",
+  "primary-model",
+  "deep-model",
   "deepseek-v4.1-flash",
-  "deepseek-v3-2-volc",
+  "deepseek-v4.1-flash-sg",
+  "gpt-6-astra",
+  "hy4-preview",
+  "hy3",
+  "kimi-k2.8-preview",
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+  "gpt-5.5",
+  "gpt-5.4",
+  "gemini-3.5-flash",
+  "glm-5.3-flash",
+  "glm-5.3",
+  "glm-5.2",
+  "kimi-k3",
+  "kimi-k2.6",
+];
+// Verified 2026-10-07 against CodeBuddy CLI v2.161.4 (shipped product.json +
+// authenticated GET /v3/config both report this exact 22-model International
+// catalog; contextLength mirrors upstream maxInputTokens).
+const expectedModels = [
+  {
+    id: "default-model",
+    name: "Auto",
+    contextLength: 176000,
+    maxOutputTokens: 24000,
+    supportsVision: true,
+  },
+  {
+    id: "fast-model",
+    name: "Fast",
+    contextLength: 200000,
+    maxOutputTokens: 32000,
+    supportsReasoning: true,
+    supportsVision: true,
+  },
+  {
+    id: "balanced-model",
+    name: "Balanced",
+    contextLength: 256000,
+    maxOutputTokens: 32000,
+    supportsReasoning: true,
+    supportsVision: true,
+  },
+  {
+    id: "primary-model",
+    name: "Primary",
+    contextLength: 272000,
+    maxOutputTokens: 72000,
+    supportsReasoning: true,
+    supportsVision: true,
+  },
+  {
+    id: "deep-model",
+    name: "Deep",
+    contextLength: 176000,
+    maxOutputTokens: 24000,
+    supportsVision: true,
+  },
+  {
+    id: "deepseek-v4.1-flash",
+    name: "DeepSeek-V4.1-Flash",
+    contextLength: 1000000,
+    maxOutputTokens: 128000,
+    supportsReasoning: true,
+    supportsVision: true,
+  },
+  {
+    id: "deepseek-v4.1-flash-sg",
+    name: "DeepSeek-V4.1-Flash (SG)",
+    contextLength: 1000000,
+    maxOutputTokens: 128000,
+    supportsReasoning: true,
+    supportsVision: true,
+  },
+  {
+    id: "gpt-6-astra",
+    name: "GPT-6-Astra",
+    contextLength: 1000000,
+    maxOutputTokens: 128000,
+    supportsReasoning: true,
+    supportsVision: true,
+  },
+  {
+    id: "hy4-preview",
+    name: "Hy4 Preview",
+    contextLength: 1000000,
+    maxOutputTokens: 64000,
+    supportsReasoning: true,
+    supportsVision: true,
+  },
+  {
+    id: "hy3",
+    name: "Hy3",
+    contextLength: 192000,
+    maxOutputTokens: 64000,
+    supportsReasoning: true,
+    supportsVision: true,
+  },
+  {
+    id: "kimi-k2.8-preview",
+    name: "Kimi-K2.8-Preview",
+    contextLength: 1000000,
+    maxOutputTokens: 32000,
+    supportsReasoning: true,
+    supportsVision: true,
+  },
+  {
+    id: "gpt-5.6-sol",
+    name: "GPT-5.6-Sol",
+    contextLength: 1000000,
+    maxOutputTokens: 128000,
+    supportsReasoning: true,
+    supportsVision: true,
+  },
+  {
+    id: "gpt-5.6-terra",
+    name: "GPT-5.6-Terra",
+    contextLength: 1000000,
+    maxOutputTokens: 128000,
+    supportsReasoning: true,
+    supportsVision: true,
+  },
+  {
+    id: "gpt-5.6-luna",
+    name: "GPT-5.6-Luna",
+    contextLength: 1000000,
+    maxOutputTokens: 128000,
+    supportsReasoning: true,
+    supportsVision: true,
+  },
+  {
+    id: "gpt-5.5",
+    name: "GPT-5.5",
+    contextLength: 1000000,
+    maxOutputTokens: 128000,
+    supportsReasoning: true,
+    supportsVision: true,
+  },
+  {
+    id: "gpt-5.4",
+    name: "GPT-5.4",
+    contextLength: 272000,
+    maxOutputTokens: 72000,
+    supportsReasoning: true,
+    supportsVision: true,
+  },
+  {
+    id: "gemini-3.5-flash",
+    name: "Gemini-3.5-Flash",
+    contextLength: 1000000,
+    maxOutputTokens: 65536,
+    supportsReasoning: true,
+    supportsVision: true,
+  },
+  {
+    id: "glm-5.3-flash",
+    name: "GLM-5.3-Flash",
+    contextLength: 1000000,
+    maxOutputTokens: 32000,
+    supportsReasoning: true,
+    supportsVision: true,
+  },
+  {
+    id: "glm-5.3",
+    name: "GLM-5.3",
+    contextLength: 1000000,
+    maxOutputTokens: 48000,
+    supportsReasoning: true,
+    supportsVision: true,
+  },
+  {
+    id: "glm-5.2",
+    name: "GLM-5.2",
+    contextLength: 1000000,
+    maxOutputTokens: 48000,
+    supportsReasoning: true,
+    supportsVision: true,
+  },
+  {
+    id: "kimi-k3",
+    name: "Kimi-K3",
+    contextLength: 1000000,
+    maxOutputTokens: 32000,
+    supportsReasoning: true,
+    supportsVision: true,
+  },
+  {
+    id: "kimi-k2.6",
+    name: "Kimi-K2.6",
+    contextLength: 256000,
+    maxOutputTokens: 32000,
+    supportsReasoning: true,
+    supportsVision: true,
+  },
 ];
 
 test.afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-test("International registry exposes the .ai IDE gateway, cbai alias, and 15 CN-metadata models", () => {
+test("International registry exposes the .ai gateway, cbai alias, and the verified 22-model live catalog", () => {
   const provider = REGISTRY["codebuddy-intl"];
   assert.equal(provider.id, "codebuddy-intl");
   assert.equal(provider.alias, "cbai");
@@ -81,23 +267,9 @@ test("International registry exposes the .ai IDE gateway, cbai alias, and 15 CN-
     generateModels().cbai.map((model) => model.id),
     modelIds
   );
-  assert.deepEqual(
-    provider.models.map((model) => model.id),
-    modelIds
-  );
-  for (const model of provider.models) {
-    const cnId = model.id === "deepseek-v4.1-flash" ? "deepseek-v4-flash" : model.id;
-    const cn = REGISTRY["codebuddy-cn"].models.find((entry) => entry.id === cnId);
-    assert.ok(cn, cnId);
-    for (const field of [
-      "contextLength",
-      "maxOutputTokens",
-      "supportsReasoning",
-      "supportsVision",
-    ] as const) {
-      assert.equal(model[field], cn[field], `${model.id}.${field}`);
-    }
-  }
+  // Pins the full verified catalog (ids, names, context/output limits, and
+  // capability flags) so drift from the live International lineup fails loudly.
+  assert.deepEqual(provider.models, expectedModels);
 });
 
 test("International OAuth config and device-flow registrations use the .ai IDE endpoints", () => {
@@ -137,7 +309,7 @@ test("International dashboard uses device login and counts OAuth and API-key con
     subscriptionRisk: true,
     riskNoticeVariant: "oauth",
     authHint:
-      "CodeBuddy International (www.codebuddy.ai). Sign in via the official IDE device-code flow, or paste a direct API key (sent as Authorization: Bearer). Catalog: GLM / Kimi / MiniMax / DeepSeek / Hunyuan.",
+      "CodeBuddy International (www.codebuddy.ai). Sign in via the official IDE device-code flow, or paste a direct API key (sent as Authorization: Bearer). Catalog: GLM / Kimi / GPT / Gemini / DeepSeek / Hunyuan.",
   });
   assert.equal(resolveProviderId("cbai"), "codebuddy-intl");
   assert.equal(supportsApiKeyOnFreeProvider("codebuddy-intl"), true);

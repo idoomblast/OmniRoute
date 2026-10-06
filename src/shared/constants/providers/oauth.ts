@@ -271,6 +271,6 @@ export const OAUTH_PROVIDERS = {
     subscriptionRisk: true,
     riskNoticeVariant: "oauth",
     authHint:
-      "CodeBuddy International (www.codebuddy.ai). Sign in via the official IDE device-code flow, or paste a direct API key (sent as Authorization: Bearer). Catalog: GLM / Kimi / MiniMax / DeepSeek / Hunyuan.",
+      "CodeBuddy International (www.codebuddy.ai). Sign in via the official IDE device-code flow, or paste a direct API key (sent as Authorization: Bearer). Catalog: GLM / Kimi / GPT / Gemini / DeepSeek / Hunyuan.",
   },
 };
