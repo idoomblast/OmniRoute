@@ -743,8 +743,9 @@ export class DefaultExecutor extends BaseExecutor {
       }
     }
 
-    // Reasoning models burn all of max_tokens on the thinking phase when the budget is too
-    // small, leaving content empty (finish_reason: "length"); applies to all providers (#6912).
+    // Fork (2026-10-06): ensureThinkingBudget is now a documented no-op — the output-budget
+    // floor was deliberately removed (#14888 / #14912; passthrough like opencode-go). The
+    // call is kept so this hook point stays greppable and easy to diff during rebases.
     if (typeof withDefaults === "object" && withDefaults !== null) {
       this.ensureThinkingBudget(withDefaults as Record<string, unknown>, model);
     }
@@ -768,43 +769,14 @@ export class DefaultExecutor extends BaseExecutor {
     return withDefaults;
   }
 
-  // Reasoning models (ClinePass, OpenRouter, etc.) leave content empty when the reasoning
-  // budget consumes all of max_tokens; bump max_tokens to a safe minimum when undersized.
-  ensureThinkingBudget(body: Record<string, unknown>, model: string): Record<string, unknown> {
-    if (!body) return body;
-
-    const outboundModel = typeof body.model === "string" ? body.model : model;
-    const entry = getRegistryEntry(this.provider);
-    const modelEntry = entry?.models?.find((m) => m.id === outboundModel);
-    if (!modelEntry?.supportsReasoning) return body;
-
-    const extraBody = body.extra_body as Record<string, unknown> | undefined;
-    const thinking = extraBody?.thinking as Record<string, unknown> | undefined;
-    const effort = body.reasoning_effort;
-    const reasoningEnabled =
-      thinking?.type === "enabled" ||
-      (typeof effort === "string" && effort !== "none" && effort !== "off") ||
-      effort === true;
-    if (!reasoningEnabled) return body;
-
-    const MIN_TOKENS = 4096;
-    const maxOutput =
-      typeof modelEntry.maxOutputTokens === "number" && modelEntry.maxOutputTokens > 0
-        ? modelEntry.maxOutputTokens
-        : MIN_TOKENS;
-    const target = Math.min(MIN_TOKENS, maxOutput);
-    const current = body.max_tokens ?? body.max_completion_tokens;
-
-    // #6912: keep whichever token key transformRequest already set (o1/o3/o4/gpt-5 use
-    // max_completion_tokens) instead of re-introducing max_tokens alongside it.
-    const tokenKey =
-      body.max_completion_tokens !== undefined ? "max_completion_tokens" : "max_tokens";
-
-    if (typeof current !== "number" || current <= 0) {
-      body[tokenKey] = target;
-    } else if (current < MIN_TOKENS && current < maxOutput) {
-      body[tokenKey] = MIN_TOKENS;
-    }
+  // Fork patch (2026-10-06; Mas decision — "no key at all", parity with opencode-go):
+  // the output-budget floor is intentionally DISABLED. Upstream #14888 (OPEN) tracks the
+  // damage: the injected 4096 ceiling was burned entirely by reasoning tokens on
+  // long-reasoning models (empty visible content, finish_reason "length"); #14912 (merged)
+  // separately stopped raising explicit client budgets ("a positive client budget is a
+  // choice"). Output budgets now pass through untouched; with no client cap the provider
+  // default applies.
+  ensureThinkingBudget(body: Record<string, unknown>, _model: string): Record<string, unknown> {
     return body;
   }
 
