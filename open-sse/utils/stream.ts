@@ -317,6 +317,25 @@ function collectPassthroughTextualToolCall(
   return toolCall;
 }
 
+/** Collect one already-parsed DSML tool call into the passthrough map (same ledger as textual calls). */
+function collectDsmlTextualToolCall(
+  call: { name: string; args: Record<string, unknown> },
+  toolCalls: Map<string, ToolCall>
+): ToolCall | null {
+  const key = `dsml:${toolCalls.size}`;
+  const toolCall: ToolCall = {
+    id: `call_dsml_${Date.now()}_${toolCalls.size}`,
+    index: toolCalls.size,
+    type: "function",
+    function: {
+      name: call.name,
+      arguments: JSON.stringify(call.args || {}),
+    },
+  };
+  toolCalls.set(key, toolCall);
+  return toolCall;
+}
+
 /* @testonly */ export function toStreamingToolCallDelta(toolCall: ToolCall) {
   return {
     index: toolCall.index,
@@ -864,91 +883,109 @@ export function createSSEStream(options: StreamOptions = {}) {
 
   /**
    * DSML streaming guard: buffers content that may hold a (partial) DSML
-   * tool_calls block. When the closing tag arrives, parses and converts the
-   * block into collected tool_calls; incomplete DSML stays buffered. Plain
-   * content (no DSML markers) flows through unchanged.
+   * tool_calls block. When the closing tag arrives, parses the block and
+   * converts it into a wire tool_calls delta via
+   * `toChatCompletionChunkWithToolCall` (same shape as the textual guard —
+   * the converted chunk is RETURNED, the caller re-serializes it because the
+   * `converted` flag drives the `textualToolCallConverted` branch). Incomplete
+   * DSML stays buffered; malformed DSML falls back to plain text losslessly.
+   * Plain content (no DSML markers) flows through untouched.
+   *
+   * Content accumulation for the call log is NOT done here — the main loop
+   * accumulates `delta.content` itself; mutating the delta here is enough.
    */
-  const applyDsmlToolCallStreamingGuard = (parsed: Record<string, unknown>): boolean => {
-    if (!dsmlToolCallsEnabled) return false;
+  const applyDsmlToolCallStreamingGuard = (
+    parsed: Record<string, unknown>
+  ): { parsed: Record<string, unknown>; converted: boolean } => {
+    if (!dsmlToolCallsEnabled) return { parsed, converted: false };
     const choice = Array.isArray((parsed as JsonRecord).choices)
       ? (((parsed as JsonRecord).choices as unknown[])[0] as JsonRecord | undefined)
       : undefined;
     const delta = asRecord(choice?.delta);
     const incomingRaw: unknown = delta?.content;
-    if (typeof incomingRaw !== "string") return false;
+    if (typeof incomingRaw !== "string") return { parsed, converted: false };
     const incoming: string = incomingRaw;
+    // Close detection includes the trailing `>`: a chunk ending in
+    // `</｜DSML｜tool_calls` (before the `>`) is still INCOMPLETE and must
+    // stay buffered until the `>` arrives.
     const DSML_OPEN_TAG = "<\uFF5cDSML\uFF5ctool_calls";
-    const DSML_CLOSE_TAG = "</\uFF5cDSML\uFF5ctool_calls";
-    let converted = false;
+    const DSML_CLOSE_TAG = "</\uFF5cDSML\uFF5ctool_calls>";
 
     // Fast path: no DSML markers anywhere (buffer + incoming) → pass through.
     if (
       !dsmlBufferedContent &&
       !incoming.includes(DSML_OPEN_TAG) &&
-      !incoming.includes(DSML_CLOSE_TAG)
+      !incoming.includes(DSML_CLOSE_TAG) &&
+      !mayStartDsmlTag(incoming)
     ) {
-      passthroughAccumulatedContent = appendBoundedText(passthroughAccumulatedContent, incoming);
-      return false;
+      return { parsed, converted: false };
     }
 
     dsmlBufferedContent = appendBoundedText(dsmlBufferedContent, incoming);
     delta.content = "";
 
     if (!dsmlBufferedContent.includes(DSML_CLOSE_TAG)) {
-      // Still incomplete — keep buffering. Flush a safe prefix (text before any
-      // partial open tag) so ordinary prose isn't held hostage by the buffer.
+      // Still incomplete — keep buffering. Flush a safe prefix (text before
+      // any partial open tag) so ordinary prose isn't held hostage.
+      // `converted: true` forces the caller to re-serialize the mutated
+      // chunk (same contract as the textual guard's partial path) — without
+      // it the ORIGINAL upstream line (still carrying the DSML tags) would
+      // be forwarded verbatim.
       const firstOpen = dsmlBufferedContent.indexOf(DSML_OPEN_TAG);
       if (firstOpen > 0) {
         delta.content = dsmlBufferedContent.slice(0, firstOpen);
-        passthroughAccumulatedContent = appendBoundedText(
-          passthroughAccumulatedContent,
-          delta.content
-        );
         dsmlBufferedContent = dsmlBufferedContent.slice(firstOpen);
       } else if (firstOpen === -1 && !mayStartDsmlTag(dsmlBufferedContent)) {
         // No open tag and nothing that could become one — flush everything.
         delta.content = dsmlBufferedContent;
-        passthroughAccumulatedContent = appendBoundedText(
-          passthroughAccumulatedContent,
-          dsmlBufferedContent
-        );
         dsmlBufferedContent = "";
       }
-      return false;
+      return { parsed, converted: true };
     }
 
     // Closing tag present — parse every complete block out of the buffer.
     const calls = parseDsmlToolCalls(dsmlBufferedContent);
-    const leftover = stripDsmlBlocks(dsmlBufferedContent);
+    const bufferedSnapshot = dsmlBufferedContent;
     dsmlBufferedContent = "";
 
     if (calls && calls.length > 0) {
+      // Respect the same admission policy as textual tool calls: unknown
+      // tool names (not in the request `tools[]`) are not converted.
+      const admitted = calls.filter(
+        (call) => !allowedToolNames?.size || allowedToolNames.has(call.name)
+      );
       dsmlHasEmittedToolCalls = true;
-      const baseIndex = passthroughToolCalls.size;
-      for (const call of calls) {
-        const key = `dsml:${passthroughToolCallSeq++}`;
-        const toolCall: ToolCall = {
-          id: `call_dsml_${Date.now()}_${baseIndex + calls.indexOf(call)}`,
-          index: baseIndex + calls.indexOf(call),
-          type: "function",
-          function: {
-            name: call.name,
-            arguments: JSON.stringify(call.args || {}),
-          },
-        };
-        passthroughToolCalls.set(key, toolCall);
+      // Native tool_calls already collected → suppress DSML conversion
+      // entirely (no duplicate calls); the leftover text (usually empty)
+      // falls back to the delta as plain content.
+      const hasNativeCalls = passthroughToolCalls.size > 0;
+      if (admitted.length > 0 && !hasNativeCalls) {
+        for (const call of admitted) {
+          const collected = collectDsmlTextualToolCall(call, passthroughToolCalls);
+          if (collected) {
+            // Emit the tool call on the wire via the shared delta shape.
+            parsed = toChatCompletionChunkWithToolCall(parsed, collected);
+            passthroughHasToolCalls = true;
+          }
+        }
+        return { parsed, converted: true };
       }
-      passthroughHasToolCalls = true;
-      converted = true;
-      // Drop the delta content entirely — tool_calls ride their own chunks.
-      delete delta.content;
-    } else if (leftover) {
-      // Malformed DSML: fall back to plain text (never crash the stream).
-      delta.content = leftover;
-      passthroughAccumulatedContent = appendBoundedText(passthroughAccumulatedContent, leftover);
+      // No admitted calls (unknown tools / native duplicate): fall through to
+      // leftover plain text so nothing is silently dropped.
+      const outDelta = asRecord(
+        Array.isArray((parsed as JsonRecord).choices)
+          ? (((parsed as JsonRecord).choices as unknown[])[0] as JsonRecord | undefined)?.delta
+          : undefined
+      );
+      if (outDelta) outDelta.content = stripDsmlBlocks(bufferedSnapshot);
+      return { parsed, converted: false };
     }
 
-    return converted;
+    // Malformed/unknown DSML: fall back to plain text LOSSLESSLY (never
+    // crash, never drop content) — hand the raw buffered text back through
+    // the delta unmodified.
+    delta.content = bufferedSnapshot;
+    return { parsed, converted: false };
   };
 
   /** True when the tail of `text` could be the beginning of a DSML tag. */
@@ -1959,17 +1996,18 @@ export function createSSEStream(options: StreamOptions = {}) {
                     totalContentLength += reasoningDelta.length;
                   }
                   {
-                    const dsmlConverted = applyDsmlToolCallStreamingGuard(
+                    const dsmlGuarded = applyDsmlToolCallStreamingGuard(
                       parsed as Record<string, unknown>
                     );
-                    if (!dsmlConverted) {
+                    parsed = dsmlGuarded.parsed as typeof parsed;
+                    if (dsmlGuarded.converted) {
+                      textualToolCallConverted = true;
+                    } else {
                       const guarded = applyTextualToolCallStreamingGuard(
                         parsed as Record<string, unknown>
                       );
                       parsed = guarded.parsed as typeof parsed;
                       textualToolCallConverted = guarded.textualToolCallConverted;
-                    } else {
-                      textualToolCallConverted = true;
                     }
                   }
                   if (reasoningDelta)

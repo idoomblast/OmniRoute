@@ -206,3 +206,68 @@ test("sanitizeOpenAIResponse converts multiple DSML invokes to multiple tool_cal
   assert.equal(calls[0].function.name, "write_file");
   assert.equal(calls[1].function.name, "read_file");
 });
+
+test("parseDsmlToolCalls rejects a malformed parameter (unclosed parameter inside closed invoke)", () => {
+  const s =
+    '<｜DSML｜tool_calls><｜DSML｜invoke name="terminal"><｜DSML｜parameter name="command">partial</｜DSML｜invoke></｜DSML｜tool_calls>';
+  assert.equal(parseDsmlToolCalls(s), null);
+});
+
+test("parseDsmlToolCalls preserves indentation and newlines in plain string values", () => {
+  const calls = parseDsmlToolCalls(
+    '<｜DSML｜tool_calls><｜DSML｜invoke name="write_file"><｜DSML｜parameter name="content">  indented\nline</｜DSML｜parameter></｜DSML｜invoke></｜DSML｜tool_calls>'
+  );
+  assert.ok(calls);
+  assert.equal(calls![0].args.content, "  indented\nline");
+});
+
+test("parseDsmlToolCalls decodes quoted JSON string values", () => {
+  const calls = parseDsmlToolCalls(
+    '<｜DSML｜tool_calls><｜DSML｜invoke name="write_file"><｜DSML｜parameter name="content">"hello\\nworld"</｜DSML｜parameter></｜DSML｜invoke></｜DSML｜tool_calls>'
+  );
+  assert.ok(calls);
+  assert.equal(calls![0].args.content, "hello\nworld");
+});
+
+test("parseDsmlToolCalls decodes exponent number values", () => {
+  const calls = parseDsmlToolCalls(
+    '<｜DSML｜tool_calls><｜DSML｜invoke name="f"><｜DSML｜parameter name="count">1e3</｜DSML｜parameter></｜DSML｜invoke></｜DSML｜tool_calls>'
+  );
+  assert.ok(calls);
+  assert.equal(calls![0].args.count, 1000);
+});
+
+test("parseDsmlToolCalls stores __proto__ parameter as an own argument (no prototype pollution)", () => {
+  const calls = parseDsmlToolCalls(
+    '<｜DSML｜tool_calls><｜DSML｜invoke name="f"><｜DSML｜parameter name="__proto__">{"polluted":true}</｜DSML｜parameter></｜DSML｜invoke></｜DSML｜tool_calls>'
+  );
+  assert.ok(calls);
+  assert.equal(Object.hasOwn(calls![0].args, "__proto__"), true);
+});
+
+test("parseDsmlToolCalls handles a 130k-invoke block without stack overflow", () => {
+  const s =
+    "<｜DSML｜tool_calls>" +
+    '<｜DSML｜invoke name="a"></｜DSML｜invoke>'.repeat(130000) +
+    "</｜DSML｜tool_calls>";
+  const calls = parseDsmlToolCalls(s);
+  assert.ok(calls);
+  assert.equal(calls!.length, 130000);
+});
+
+test("sanitizeOpenAIResponse malformed-parameter DSML falls back losslessly (non-streaming)", () => {
+  const s =
+    '<｜DSML｜tool_calls><｜DSML｜invoke name="terminal"><｜DSML｜parameter name="command">partial</｜DSML｜invoke></｜DSML｜tool_calls>';
+  const out = sanitizeOpenAIResponse(
+    {
+      id: "chatcmpl_malformed",
+      object: "chat.completion",
+      created: 1,
+      model: "deepseek-v4.1-flash",
+      choices: [{ index: 0, message: { role: "assistant", content: s }, finish_reason: "stop" }],
+    },
+    { parseDsmlToolCalls: true }
+  ) as Record<string, any>;
+  assert.equal(out.choices[0].message.content, s);
+  assert.equal(out.choices[0].message.tool_calls, undefined);
+});
