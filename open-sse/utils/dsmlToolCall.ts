@@ -263,3 +263,79 @@ function defineArg(target: Record<string, unknown>, key: string, value: unknown)
     target[key] = value;
   }
 }
+
+/**
+ * Extract complete, valid DSML tool_call blocks from a string, returning the
+ * parsed calls and the non-DSML remainder (prose before/after + any partial
+ * or malformed block text, preserved verbatim).
+ *
+ * Malformed blocks (unclosed tags, bad parameter structure) are NOT silently
+ * promoted to calls — they stay in the remainder as plain text so nothing is
+ * ever lost.  This replaces the older parse+strip pair which could drop
+ * malformed content and reject a whole batch when only one block was bad.
+ */
+export interface DsmlExtraction {
+  calls: DsmlToolCall[];
+  remainder: string;
+}
+
+export function extractDsmlBlocks(content: string): DsmlExtraction {
+  const empty: DsmlExtraction = { calls: [], remainder: content };
+  if (!content || !content.includes(DSML_OPEN)) return empty;
+
+  const normalized = content.replace(DSML_ZERO_WIDTH, "");
+  const OPEN_BLOCK = DSML_OPEN + "tool_calls";
+  const CLOSE_BLOCK = "</\uFF5cDSML\uFF5ctool_calls";
+
+  if (!normalized.includes(OPEN_BLOCK)) return empty;
+
+  const calls: DsmlToolCall[] = [];
+  const parts: string[] = [];
+  let cursor = 0;
+
+  while (true) {
+    const blockStart = normalized.indexOf(OPEN_BLOCK, cursor);
+    if (blockStart === -1) break;
+
+    // Exact tag boundary check: the character immediately after the tag name
+    // must be '>' or whitespace — a letter/underscore/digit means this is NOT
+    // a real DSML tag (e.g. "<｜DSML｜tool_calls_BAD>") and must not parse.
+    const afterPrefix = blockStart + OPEN_BLOCK.length;
+    const boundaryChar = normalized[afterPrefix];
+    if (boundaryChar !== undefined && boundaryChar !== ">" && !/\s/.test(boundaryChar)) {
+      // Not a real DSML tag — advance past this prefix and keep scanning.
+      cursor = afterPrefix;
+      continue;
+    }
+
+    const openGt = normalized.indexOf(">", afterPrefix);
+    if (openGt === -1) break; // partial open tag — keep in remainder
+
+    const blockEnd = normalized.indexOf(CLOSE_BLOCK, openGt + 1);
+    if (blockEnd === -1) break; // incomplete block — keep in remainder
+
+    const blockCloseGt = normalized.indexOf(">", blockEnd + CLOSE_BLOCK.length);
+    if (blockCloseGt === -1) break; // partial close tag
+
+    const inner = normalized.slice(openGt + 1, blockEnd);
+    const invokes = parseInvokes(inner);
+
+    if (invokes === null || invokes.length === 0) {
+      // Malformed or empty block — leave it in the remainder as plain text
+      // (lossless), advance cursor past it so we don't re-scan.
+      parts.push(normalized.slice(cursor, blockCloseGt + 1));
+      cursor = blockCloseGt + 1;
+      continue;
+    }
+
+    // Valid block: prose before it goes to remainder
+    parts.push(normalized.slice(cursor, blockStart));
+    for (const invoke of invokes) calls.push(invoke);
+    cursor = blockCloseGt + 1;
+  }
+
+  // Remaining text (after last processed block) — includes any partial block
+  parts.push(normalized.slice(cursor));
+
+  return { calls, remainder: parts.join("") };
+}

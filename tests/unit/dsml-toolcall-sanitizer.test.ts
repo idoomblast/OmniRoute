@@ -126,7 +126,9 @@ test("sanitizeOpenAIResponse converts DSML tool calls only when parseDsmlToolCal
   // Flag ON: DSML converted to standard tool_calls.
   const on = sanitizeOpenAIResponse(body, { parseDsmlToolCalls: true }) as Record<string, any>;
   const msg = on.choices[0].message;
-  assert.equal(msg.content, null);
+  // Prose surrounding the DSML block is preserved as remainder (R2 fix: never
+  // silently discard prose that happens to surround a converted call).
+  assert.equal(msg.content, "Before text.\n\nAfter text.");
   assert.equal(msg.tool_calls.length, 1);
   assert.equal(msg.tool_calls[0].type, "function");
   assert.equal(msg.tool_calls[0].function.name, "terminal");

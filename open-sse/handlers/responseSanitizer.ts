@@ -4,7 +4,7 @@ import {
 } from "../utils/reasoningFields.ts";
 import { stripInternalReasoningPlaceholder } from "../utils/reasoningPlaceholder.ts";
 import { normalizeOpenAICompatibleFinishReason } from "../utils/finishReason.ts";
-import { parseDsmlToolCalls } from "../utils/dsmlToolCall.ts";
+import { parseDsmlToolCalls, extractDsmlBlocks } from "../utils/dsmlToolCall.ts";
 import {
   collapseExcessiveNewlines,
   extractThinkingFromContent,
@@ -451,12 +451,19 @@ function applyDsmlToolCallSanitization(
 ): void {
   if (options.parseDsmlToolCalls !== true) return;
   if (msgRecord.tool_calls) return; // native tool_calls already present
-  if (typeof sanitized.content !== "string") return;
+  // R2 P1 #8: parse from the ORIGINAL content — by the time this runs the
+  // sanitized content has already been through collapseExcessiveNewlines
+  // (sanitizeMessageContent) which corrupts multi-newline argument values.
+  const sourceContent =
+    typeof msgRecord.content === "string" ? msgRecord.content : sanitized.content;
+  if (typeof sourceContent !== "string") return;
 
-  const dsmlCalls = parseDsmlToolCalls(sanitized.content);
-  if (!dsmlCalls || dsmlCalls.length === 0) return;
+  // R2 P1 #1: use extractDsmlBlocks so malformed blocks stay as plain text
+  // instead of being silently promoted or dropped.
+  const { calls: dsmlCalls, remainder } = extractDsmlBlocks(sourceContent);
+  if (dsmlCalls.length === 0) return;
 
-  sanitized.content = null;
+  sanitized.content = remainder || null;
   sanitized.tool_calls = dsmlCalls.map((call, i) => ({
     id: `call_dsml_${Date.now()}_${i}`,
     type: "function",
