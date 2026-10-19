@@ -134,7 +134,7 @@ import {
   getExplicitModelOutputCap,
 } from "@/lib/modelCapabilities.ts";
 import { toPositiveInteger } from "../services/reasoningTokenBuffer.ts";
-import { normalizeThinkingForModel } from "@/shared/constants/modelSpecs.ts";
+import { getModelSpec, normalizeThinkingForModel } from "@/shared/constants/modelSpecs.ts";
 import {
   buildErrorBody,
   createErrorResult,
@@ -4364,6 +4364,10 @@ export async function handleChatCore({
       translatedResponse = sanitizeOpenAIResponse(translatedResponse, {
         stripReasoning,
         parseTextualReasoningTags: shouldParseTextualReasoningTags(provider, model),
+        // DeepSeek V4.1-flash occasionally emits DSML-formatted tool calls
+        // instead of native OpenAI tool_calls JSON; convert them per-model
+        // (strictly opt-in via supportsDsmlToolCalls in model specs).
+        parseDsmlToolCalls: getModelSpec(String(model ?? ""))?.supportsDsmlToolCalls === true,
       });
     }
 

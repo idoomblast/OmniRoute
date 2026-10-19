@@ -15,6 +15,13 @@ export interface ModelSpec {
   supportsThinking?: boolean;
   supportsTools?: boolean;
   supportsVision?: boolean;
+  /**
+   * Model may emit tool calls in DSML XML format (`<｜DSML｜tool_calls>...`) instead of
+   * native OpenAI tool_calls JSON. When true, the response sanitizer attempts to parse
+   * DSML blocks from content and convert them to standard tool_calls. Strictly opt-in
+   * per-model — only DeepSeek V4.1-flash is known to produce this format.
+   */
+  supportsDsmlToolCalls?: boolean;
   // Model defaults to adaptive thinking and REJECTS an explicit `thinking.type:"disabled"`
   // (upstream returns 400). Used to normalize the request when a combo/route substitutes
   // this model after the client already chose `disabled`. See issue #3554.
@@ -743,6 +750,7 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
     supportsThinking: true,
     supportsTools: true,
     supportsVision: true,
+    supportsDsmlToolCalls: true,
     supportedThinkingEfforts: ["low", "high", "max"],
     aliases: ["deepseek-flash", "deepseek-v4.1-flash-expires-on-0910"],
   },

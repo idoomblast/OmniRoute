@@ -4,6 +4,7 @@ import {
 } from "../utils/reasoningFields.ts";
 import { stripInternalReasoningPlaceholder } from "../utils/reasoningPlaceholder.ts";
 import { normalizeOpenAICompatibleFinishReason } from "../utils/finishReason.ts";
+import { parseDsmlToolCalls } from "../utils/dsmlToolCall.ts";
 import {
   collapseExcessiveNewlines,
   extractThinkingFromContent,
@@ -45,7 +46,7 @@ const ALLOWED_RESPONSES_USAGE_FIELDS = new Set([
 ]);
 
 type JsonRecord = Record<string, unknown>;
-type ParseOptions = { parseTextualReasoningTags?: boolean };
+type ParseOptions = { parseTextualReasoningTags?: boolean; parseDsmlToolCalls?: boolean };
 
 export const OMIT_STREAMING_CHUNK_MARKER = "__omniroute_omit_streaming_chunk";
 
@@ -245,6 +246,14 @@ export interface SanitizeOpenAIResponseOptions {
    * upstream contract uses textual tags as the native reasoning channel.
    */
   parseTextualReasoningTags?: boolean;
+  /**
+   * Enable only for models flagged `supportsDsmlToolCalls` in model specs
+   * (currently DeepSeek V4.1-flash). When true, DSML-formatted tool calls
+   * (`<｜DSML｜tool_calls>…`) found in message content are converted to
+   * standard OpenAI `tool_calls`. Strictly opt-in per-model so a parser bug
+   * can only affect the flagged model.
+   */
+  parseDsmlToolCalls?: boolean;
 }
 
 export function sanitizeOpenAIResponse(
@@ -255,6 +264,7 @@ export function sanitizeOpenAIResponse(
   if (!bodyRecord) return body;
   const stripReasoning = options.stripReasoning === true;
   const parseTextualReasoningTags = options.parseTextualReasoningTags === true;
+  const parseDsmlToolCalls = options.parseDsmlToolCalls === true;
 
   // Build sanitized response with only allowed top-level fields
   const sanitized: JsonRecord = {};
@@ -268,7 +278,10 @@ export function sanitizeOpenAIResponse(
   // Sanitize choices
   if (Array.isArray(bodyRecord.choices)) {
     sanitized.choices = bodyRecord.choices.map((choice, idx) => {
-      const sanitizedChoice = sanitizeChoice(choice, idx, { parseTextualReasoningTags });
+      const sanitizedChoice = sanitizeChoice(choice, idx, {
+        parseTextualReasoningTags,
+        parseDsmlToolCalls,
+      });
       const message = toRecord(sanitizedChoice.message);
       if (
         message &&
@@ -431,6 +444,29 @@ function applyTextualToolCallSanitization(sanitized: JsonRecord, msgRecord: Json
   }
 }
 
+function applyDsmlToolCallSanitization(
+  sanitized: JsonRecord,
+  msgRecord: JsonRecord,
+  options: ParseOptions = {}
+): void {
+  if (options.parseDsmlToolCalls !== true) return;
+  if (msgRecord.tool_calls) return; // native tool_calls already present
+  if (typeof sanitized.content !== "string") return;
+
+  const dsmlCalls = parseDsmlToolCalls(sanitized.content);
+  if (!dsmlCalls || dsmlCalls.length === 0) return;
+
+  sanitized.content = null;
+  sanitized.tool_calls = dsmlCalls.map((call, i) => ({
+    id: `call_dsml_${Date.now()}_${i}`,
+    type: "function",
+    function: {
+      name: call.name,
+      arguments: JSON.stringify(call.args || {}),
+    },
+  }));
+}
+
 function sanitizeMessage(msg: unknown, options: ParseOptions = {}): unknown {
   const msgRecord = toRecord(msg);
   if (!msgRecord) return msg;
@@ -444,6 +480,7 @@ function sanitizeMessage(msg: unknown, options: ParseOptions = {}): unknown {
 
   copyOpenAICompatibleReasoningFields(msgRecord, sanitized);
   applyTextualToolCallSanitization(sanitized, msgRecord);
+  applyDsmlToolCallSanitization(sanitized, msgRecord, options);
 
   if (msgRecord.tool_calls) {
     sanitized.tool_calls = Array.isArray(msgRecord.tool_calls)
