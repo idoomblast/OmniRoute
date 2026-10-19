@@ -255,10 +255,16 @@ test("International registry exposes the .ai gateway, cbai alias, and the verifi
   assert.equal(provider.forceStream, true);
   assert.equal(provider.baseUrl, "https://www.codebuddy.ai/v2/chat/completions");
   assert.deepEqual(provider.headers, {
-    "User-Agent": "IDE/2.108.1 CodeBuddy/2.108.1",
+    "User-Agent": "CLI/2.161.4 CodeBuddy/2.161.4",
     "X-Product": "SaaS",
-    "X-IDE-Type": "IDE",
-    "X-IDE-Name": "IDE",
+    "x-domain": "www.codebuddy.ai",
+    "X-IDE-Type": "CLI",
+    "X-IDE-Name": "CLI",
+    "X-IDE-Version": "2.161.4",
+    "x-agent-intent": "craft",
+    "x-agent-purpose": "conversation",
+    "x-agent-type": "main",
+    "x-private-data": "false",
     "x-requested-with": "XMLHttpRequest",
     "x-codebuddy-request": "1",
   });
@@ -499,6 +505,34 @@ test("International executor is registered by id and cbai, forces SSE and uses I
   assert.equal(transform({ stream: false }).stream, true);
 });
 
+test("International executor sends the official conversation identity headers", () => {
+  const identityHeaders = [
+    "x-conversation-id",
+    "x-request-id",
+    "x-conversation-message-id",
+    "x-conversation-request-id",
+    "x-root-request-id",
+  ];
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  const headers = new Headers(executor.buildHeaders({ accessToken: "test-access" }, true));
+  for (const name of identityHeaders) {
+    const value = headers.get(name);
+    assert.ok(value && uuid.test(value), `${name} must be a UUID, got ${value}`);
+  }
+  assert.equal(headers.get("x-request-id"), headers.get("x-conversation-message-id"));
+  assert.equal(headers.get("user-agent"), "CLI/2.161.4 CodeBuddy/2.161.4");
+
+  // A caller's UA (chatCore forwards it) must not replace the client identity.
+  const forwarded = new Headers(
+    executor.buildHeaders({ accessToken: "test-access" }, true, { "user-agent": "undici" })
+  );
+  assert.equal(forwarded.get("user-agent"), "CLI/2.161.4 CodeBuddy/2.161.4");
+
+  // Ids are per outbound attempt, never shared across requests.
+  const again = new Headers(executor.buildHeaders({ accessToken: "test-access" }, true));
+  assert.notEqual(again.get("x-request-id"), headers.get("x-request-id"));
+});
+
 test("International reasoning is opt-in and none/off do not add a summary", () => {
   for (const effort of [undefined, "none", "off"]) {
     const out = transform({
@@ -655,7 +689,17 @@ test("International sends normalized IDE wire requests and does not buffer succe
   globalThis.fetch = async (url, init) => {
     assert.equal(url, REGISTRY["codebuddy-intl"].baseUrl);
     const headers = new Headers(init?.headers);
-    assert.equal(headers.get("User-Agent"), "IDE/2.108.1 CodeBuddy/2.108.1");
+    assert.equal(headers.get("User-Agent"), "CLI/2.161.4 CodeBuddy/2.161.4");
+    assert.equal(headers.get("x-ide-type"), "CLI");
+    for (const name of [
+      "x-conversation-id",
+      "x-request-id",
+      "x-conversation-message-id",
+      "x-conversation-request-id",
+      "x-root-request-id",
+    ]) {
+      assert.ok(headers.get(name), `missing ${name}`);
+    }
     assert.equal(headers.get("Authorization"), "Bearer test-access");
     const body = JSON.parse(String(init?.body));
     assert.equal(body.stream, true);
@@ -879,7 +923,16 @@ test("International usage dispatches the IDE billing wire request and keeps refi
       );
       assert.equal(headers.get("Content-Type"), "application/json");
       assert.equal(headers.get("Accept"), "application/json");
-      for (const [name, value] of Object.entries(REGISTRY["codebuddy-intl"].headers)) {
+      for (const [name, value] of Object.entries({
+        // The billing endpoint still accepts (and the handler still sends) the
+        // IDE identity; channel verification only gates chat completions.
+        "User-Agent": "IDE/2.108.1 CodeBuddy/2.108.1",
+        "X-Product": "SaaS",
+        "X-IDE-Type": "IDE",
+        "X-IDE-Name": "IDE",
+        "x-requested-with": "XMLHttpRequest",
+        "x-codebuddy-request": "1",
+      })) {
         assert.equal(headers.get(name), value);
       }
       return jsonResponse({ code: 0, data: { Response: { Data: { Accounts: accounts } } } });

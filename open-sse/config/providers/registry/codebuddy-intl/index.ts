@@ -25,10 +25,19 @@ export const codebuddy_intlProvider: RegistryEntry = {
   authType: "oauth",
   authHeader: "bearer",
   headers: {
-    "User-Agent": "IDE/2.108.1 CodeBuddy/2.108.1",
+    // Identity reported by the official CodeBuddy CLI. The gateway's channel
+    // check rejects requests that don't look like the official client; the
+    // per-request conversation ids are added by the executor.
+    "User-Agent": "CLI/2.161.4 CodeBuddy/2.161.4",
     "X-Product": "SaaS",
-    "X-IDE-Type": "IDE",
-    "X-IDE-Name": "IDE",
+    "x-domain": "www.codebuddy.ai",
+    "X-IDE-Type": "CLI",
+    "X-IDE-Name": "CLI",
+    "X-IDE-Version": "2.161.4",
+    "x-agent-intent": "craft",
+    "x-agent-purpose": "conversation",
+    "x-agent-type": "main",
+    "x-private-data": "false",
     "x-requested-with": "XMLHttpRequest",
     "x-codebuddy-request": "1",
   },

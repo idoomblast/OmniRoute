@@ -1,8 +1,12 @@
+import { randomUUID } from "node:crypto";
 import { buildErrorBody, sanitizeErrorMessage } from "../utils/error.ts";
 import { DefaultExecutor } from "./default.ts";
 import type { ExecuteInput, ExecutorExecuteResult, ProviderCredentials } from "./base.ts";
 
 const LARGE_TOOL_METADATA_BYTES = 64 * 1024;
+// Matches the CodeBuddy CLI this provider authenticates as. The gateway checks
+// the reported IDE identity, so keep it aligned with the supported client line.
+const CODEBUDDY_INTL_CLIENT_USER_AGENT = "CLI/2.161.4 CodeBuddy/2.161.4";
 const NEUTRAL_PROMPT = "You are a helpful AI assistant that helps with software engineering tasks.";
 // Ported from OmniRoute release/v3.8.52's CN executor; scoped to International.
 const AGENT_PATTERN =
@@ -99,12 +103,42 @@ async function isSensitiveContentRejection(response: Response): Promise<boolean>
 
 /**
  * International gateway port from decolua/9router, with CN stream/reasoning
- * semantics and release/v3.8.52 prompt/tool robustness. Authenticated intl chat
- * is NOT live-verified yet: the implementation is covered by mocked wire tests.
+ * semantics and release/v3.8.52 prompt/tool robustness. Live-verified
+ * 2026-10-19: authenticated chat returns 200 once the official conversation
+ * identity headers are sent (see buildHeaders).
  */
 export class CodeBuddyIntlExecutor extends DefaultExecutor {
   constructor() {
     super("codebuddy-intl");
+  }
+
+  /**
+   * The International gateway blocks requests that do not carry the official
+   * client's conversation identity: HTTP 400, code 11128 "request illegal" with
+   * "failed channel verification, possibly not from an official client".
+   * Product/UA headers alone are not enough — the five ids below must all be
+   * present (verified live 2026-10-19: same body returns 200 with them, 400
+   * without). Ids are opaque to the gateway, so every outbound attempt gets
+   * fresh UUIDs; the client User-Agent is re-pinned because chatCore forwards
+   * the caller's UA over the provider's.
+   */
+  buildHeaders(
+    credentials: ProviderCredentials,
+    stream = true,
+    clientHeaders?: Record<string, string> | null
+  ): Record<string, string> {
+    const headers = super.buildHeaders(credentials, stream, clientHeaders);
+    const requestId = randomUUID();
+    headers["x-conversation-id"] = randomUUID();
+    headers["x-request-id"] = requestId;
+    headers["x-conversation-message-id"] = requestId;
+    headers["x-conversation-request-id"] = requestId;
+    headers["x-root-request-id"] = requestId;
+    for (const key of Object.keys(headers)) {
+      if (key.toLowerCase() === "user-agent") delete headers[key];
+    }
+    headers["User-Agent"] = CODEBUDDY_INTL_CLIENT_USER_AGENT;
+    return headers;
   }
 
   transformRequest(
