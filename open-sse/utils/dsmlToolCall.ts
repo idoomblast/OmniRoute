@@ -40,14 +40,25 @@ export interface DsmlToolCall {
 const DSML_OPEN = "<\uFF5cDSML\uFF5c";
 const DSML_ZERO_WIDTH = /[\u200B-\u200D\uFEFF]/g;
 
+/**
+ * Opening marker of a DSML `tool_calls` block. Exported for the streaming
+ * guard in `stream.ts`, which must detect (partial) blocks in content deltas.
+ */
+export const DSML_OPEN_TAG = "<\uFF5cDSML\uFF5ctool_calls";
+/** Closing marker of a DSML `tool_calls` block, including the trailing `>`. */
+export const DSML_CLOSE_TAG = "</\uFF5cDSML\uFF5ctool_calls>";
+
 /** Find the end of a tag of the form `<｜DSML｜name ...>` starting at `from`. */
-function findTagEnd(text: string, from: number, tagName: string): number {
-  // text.slice(from) must start with the literal open prefix + tagName.
-  const prefix = DSML_OPEN + tagName;
+function findTagEnd(text: string, from: number, tagName: string, closing = false): number {
+  const prefix = (closing ? "</｜DSML｜" : DSML_OPEN) + tagName;
   if (!text.startsWith(prefix, from)) return -1;
-  // For open tags with attributes we scan to the closing '>'.
+  const boundary = text[from + prefix.length];
+  if (boundary !== ">" && !/\s/.test(boundary || "")) return -1;
   const gt = text.indexOf(">", from + prefix.length);
-  return gt === -1 ? -1 : gt; // index of '>'
+  if (gt === -1) return -1;
+  const attributes = text.slice(from + prefix.length, gt);
+  if (attributes.includes("<") || (closing && attributes.trim())) return -1;
+  return gt;
 }
 
 /**
@@ -58,52 +69,7 @@ function findTagEnd(text: string, from: number, tagName: string): number {
  */
 export function parseDsmlToolCalls(content: unknown): DsmlToolCall[] | null {
   if (typeof content !== "string" || !content.trim()) return null;
-
-  const normalized = content.replace(DSML_ZERO_WIDTH, "");
-  const OPEN_BLOCK = DSML_OPEN + "tool_calls";
-  const CLOSE_BLOCK = "</｜DSML｜tool_calls";
-  if (!normalized.includes(OPEN_BLOCK)) return null;
-
-  const calls: DsmlToolCall[] = [];
-
-  let cursor = 0;
-  while (true) {
-    const blockStart = normalized.indexOf(OPEN_BLOCK, cursor);
-    if (blockStart === -1) break;
-
-    // 'tool_calls' block open tag must terminate with '>' (attributes allowed).
-    const openGt = normalized.indexOf(">", blockStart + OPEN_BLOCK.length);
-    if (openGt === -1) {
-      cursor = blockStart + OPEN_BLOCK.length;
-      continue;
-    }
-
-    const blockEnd = normalized.indexOf(CLOSE_BLOCK, openGt + 1);
-    if (blockEnd === -1) {
-      // Unclosed block — skip past this open tag and keep scanning.
-      cursor = openGt + 1;
-      continue;
-    }
-
-    const blockCloseGt = normalized.indexOf(">", blockEnd + CLOSE_BLOCK.length);
-    const blockInnerEnd = blockCloseGt === -1 ? normalized.length : blockCloseGt;
-    const inner = normalized.slice(openGt + 1, blockEnd);
-
-    const invokes = parseInvokes(inner);
-    if (invokes === null) {
-      // Malformed parameter section → reject the whole block (no half-parsed
-      // tool call may leak). Continue scanning after this block.
-      cursor = blockInnerEnd;
-    } else if (invokes.length > 0) {
-      // Loop push (not spread): a 130k-invoke block would overflow the call
-      // stack through `push(...invokes)` argument limits.
-      for (const invoke of invokes) calls.push(invoke);
-      cursor = blockInnerEnd;
-    } else {
-      cursor = openGt + 1;
-    }
-  }
-
+  const { calls } = extractDsmlBlocks(content);
   return calls.length > 0 ? calls : null;
 }
 
@@ -123,32 +89,22 @@ function parseInvokes(blockInner: string): DsmlToolCall[] | null {
     const invokeStart = blockInner.indexOf(OPEN_INVOKE, cursor);
     if (invokeStart === -1) break;
 
-    // Extract name="..." from the open tag.
-    const openGt = blockInner.indexOf(">", invokeStart + OPEN_INVOKE.length);
-    if (openGt === -1) {
-      cursor = invokeStart + OPEN_INVOKE.length;
-      continue;
-    }
+    const openGt = findTagEnd(blockInner, invokeStart, "invoke");
+    if (openGt === -1) return null;
     const openTag = blockInner.slice(invokeStart, openGt + 1);
     const nameMatch = openTag.match(/\bname\s*=\s*"([^"]*)"/);
-    if (!nameMatch) {
-      cursor = openGt + 1;
-      continue;
-    }
+    if (!nameMatch) return null;
     const name = nameMatch[1].trim();
-    if (!name) {
-      cursor = openGt + 1;
-      continue;
-    }
+    if (!name) return null;
 
     const closeStart = blockInner.indexOf(CLOSE_INVOKE, openGt + 1);
-    if (closeStart === -1) {
-      // Unclosed invoke — skip past the open tag.
-      cursor = openGt + 1;
-      continue;
-    }
+    if (closeStart === -1) return null;
+    const closeGt = findTagEnd(blockInner, closeStart, "invoke", true);
+    if (closeGt === -1) return null;
+    const nestedOpen = blockInner.indexOf(OPEN_INVOKE, openGt + 1);
+    if (nestedOpen !== -1 && nestedOpen < closeStart) return null;
     const body = blockInner.slice(openGt + 1, closeStart);
-    cursor = blockInner.indexOf(">", closeStart) + 1 || closeStart + CLOSE_INVOKE.length;
+    cursor = closeGt + 1;
 
     // Self-closing invoke (no parameters): `<｜DSML｜invoke name="x"></｜DSML｜invoke>`
     const args = body.trim() === "" ? {} : parseParameters(body);
@@ -181,20 +137,11 @@ function parseParameters(invokeBody: string): Record<string, unknown> | null {
       // stray non-tag content, which we ignore (tolerant).
       break;
     }
-    const openGt = invokeBody.indexOf(">", paramStart + OPEN_PARAM.length);
-    if (openGt === -1) {
-      // Unclosed open tag with no close anywhere → malformed.
-      const hasCloseLater = invokeBody.indexOf(CLOSE_PARAM, paramStart) !== -1;
-      if (!hasCloseLater) return null;
-      cursor = paramStart + OPEN_PARAM.length;
-      continue;
-    }
+    const openGt = findTagEnd(invokeBody, paramStart, "parameter");
+    if (openGt === -1) return null;
     const openTag = invokeBody.slice(paramStart, openGt + 1);
     const nameMatch = openTag.match(/\bname\s*=\s*"([^"]*)"/);
-    if (!nameMatch) {
-      cursor = openGt + 1;
-      continue;
-    }
+    if (!nameMatch) return null;
 
     // Find the matching close tag. A nested OPEN_PARAM before the close (a
     // parameter inside a parameter — impossible in the format) means the
@@ -204,14 +151,16 @@ function parseParameters(invokeBody: string): Record<string, unknown> | null {
     if (closeStart === -1 || (nestedOpen !== -1 && nestedOpen < closeStart)) {
       return null;
     }
+    const closeGt = findTagEnd(invokeBody, closeStart, "parameter", true);
+    if (closeGt === -1) return null;
     const paramName = nameMatch[1].trim();
     const rawValue = invokeBody.slice(openGt + 1, closeStart);
     if (!paramName) {
-      cursor = closeStart + CLOSE_PARAM.length;
+      cursor = closeGt + 1;
       continue;
     }
     defineArg(args, paramName, parseParameterValue(rawValue));
-    cursor = closeStart + CLOSE_PARAM.length;
+    cursor = closeGt + 1;
   }
 
   return args;
@@ -277,65 +226,85 @@ function defineArg(target: Record<string, unknown>, key: string, value: unknown)
 export interface DsmlExtraction {
   calls: DsmlToolCall[];
   remainder: string;
+  /** Original-source offset of a trailing incomplete block or opening prefix. */
+  pendingStart?: number;
 }
 
 export function extractDsmlBlocks(content: string): DsmlExtraction {
   const empty: DsmlExtraction = { calls: [], remainder: content };
-  if (!content || !content.includes(DSML_OPEN)) return empty;
+  if (!content || !content.includes("<")) return empty;
 
   const normalized = content.replace(DSML_ZERO_WIDTH, "");
-  const OPEN_BLOCK = DSML_OPEN + "tool_calls";
-  const CLOSE_BLOCK = "</\uFF5cDSML\uFF5ctool_calls";
-
-  if (!normalized.includes(OPEN_BLOCK)) return empty;
+  // Recognition uses normalized text; unconverted text uses source slices.
+  const offsets: number[] | null = normalized.length === content.length ? null : [];
+  if (offsets) {
+    for (let i = 0; i < content.length; i++) {
+      const code = content.charCodeAt(i);
+      if ((code >= 0x200b && code <= 0x200d) || code === 0xfeff) continue;
+      offsets.push(i);
+    }
+  }
+  const sourceOffset = (index: number) => offsets?.[index] ?? index;
+  const sourceEnd = (index: number) => sourceOffset(index - 1) + 1;
+  const CLOSE_BLOCK = DSML_CLOSE_TAG.slice(0, -1);
 
   const calls: DsmlToolCall[] = [];
   const parts: string[] = [];
   let cursor = 0;
+  let preserved = 0;
+  let pendingStart: number | undefined;
 
   while (true) {
-    const blockStart = normalized.indexOf(OPEN_BLOCK, cursor);
+    const blockStart = normalized.indexOf(DSML_OPEN_TAG, cursor);
     if (blockStart === -1) break;
-
-    // Exact tag boundary check: the character immediately after the tag name
-    // must be '>' or whitespace — a letter/underscore/digit means this is NOT
-    // a real DSML tag (e.g. "<｜DSML｜tool_calls_BAD>") and must not parse.
-    const afterPrefix = blockStart + OPEN_BLOCK.length;
+    const afterPrefix = blockStart + DSML_OPEN_TAG.length;
     const boundaryChar = normalized[afterPrefix];
     if (boundaryChar !== undefined && boundaryChar !== ">" && !/\s/.test(boundaryChar)) {
-      // Not a real DSML tag — advance past this prefix and keep scanning.
       cursor = afterPrefix;
       continue;
     }
-
-    const openGt = normalized.indexOf(">", afterPrefix);
-    if (openGt === -1) break; // partial open tag — keep in remainder
-
-    const blockEnd = normalized.indexOf(CLOSE_BLOCK, openGt + 1);
-    if (blockEnd === -1) break; // incomplete block — keep in remainder
-
-    const blockCloseGt = normalized.indexOf(">", blockEnd + CLOSE_BLOCK.length);
-    if (blockCloseGt === -1) break; // partial close tag
-
-    const inner = normalized.slice(openGt + 1, blockEnd);
-    const invokes = parseInvokes(inner);
-
-    if (invokes === null || invokes.length === 0) {
-      // Malformed or empty block — leave it in the remainder as plain text
-      // (lossless), advance cursor past it so we don't re-scan.
-      parts.push(normalized.slice(cursor, blockCloseGt + 1));
-      cursor = blockCloseGt + 1;
+    const openGt = findTagEnd(normalized, blockStart, "tool_calls");
+    if (openGt === -1) {
+      if (normalized.indexOf(">", afterPrefix) === -1) {
+        pendingStart = sourceOffset(blockStart);
+        break;
+      }
+      cursor = afterPrefix;
       continue;
     }
-
-    // Valid block: prose before it goes to remainder
-    parts.push(normalized.slice(cursor, blockStart));
-    for (const invoke of invokes) calls.push(invoke);
+    const blockEnd = normalized.indexOf(CLOSE_BLOCK, openGt + 1);
+    if (blockEnd === -1) {
+      pendingStart = sourceOffset(blockStart);
+      break;
+    }
+    const blockCloseGt = findTagEnd(normalized, blockEnd, "tool_calls", true);
+    if (blockCloseGt === -1) {
+      if (normalized.indexOf(">", blockEnd) === -1) {
+        pendingStart = sourceOffset(blockStart);
+        break;
+      }
+      cursor = blockEnd + CLOSE_BLOCK.length;
+      continue;
+    }
+    const inner = normalized.slice(openGt + 1, blockEnd);
+    const invokes = parseInvokes(inner);
     cursor = blockCloseGt + 1;
+    if (invokes === null || invokes.length === 0) {
+      continue;
+    }
+    parts.push(content.slice(preserved, sourceOffset(blockStart)));
+    for (const invoke of invokes) calls.push(invoke);
+    preserved = sourceEnd(cursor);
   }
-
-  // Remaining text (after last processed block) — includes any partial block
-  parts.push(normalized.slice(cursor));
-
-  return { calls, remainder: parts.join("") };
+  if (pendingStart === undefined) {
+    // A bare '<' is held only until the next delta disambiguates it.
+    for (let size = Math.min(DSML_OPEN_TAG.length, normalized.length - cursor); size > 0; size--) {
+      if (DSML_OPEN_TAG.startsWith(normalized.slice(-size))) {
+        pendingStart = sourceOffset(normalized.length - size);
+        break;
+      }
+    }
+  }
+  parts.push(content.slice(preserved));
+  return { calls, remainder: parts.join(""), pendingStart };
 }
