@@ -40,7 +40,12 @@ import {
 } from "./responsesCommentaryDrop.ts";
 import { buildErrorBody } from "./error.ts";
 import { parseTextualToolCallCandidate, isValidToolCallHeaderPrefix } from "./textualToolCall.ts";
-import { parseDsmlToolCalls, extractDsmlBlocks } from "./dsmlToolCall.ts";
+import {
+  type DsmlToolCall,
+  extractDsmlBlocks,
+  DSML_OPEN_TAG,
+  DSML_CLOSE_TAG,
+} from "./dsmlToolCall.ts";
 import { getModelSpec } from "@/shared/constants/modelSpecs.ts";
 import { recordToolLatency } from "../services/toolLatencyTracker.ts";
 import { extractToolSchemaMap } from "../translator/response/openai-responses/toolSchemas.ts";
@@ -802,11 +807,7 @@ export function createSSEStream(options: StreamOptions = {}) {
   // bug can only affect the flagged model (DeepSeek V4.1-flash), never others.
   const dsmlToolCallsEnabled = getModelSpec(String(model ?? ""))?.supportsDsmlToolCalls === true;
   let dsmlBufferedContent = "";
-  let dsmlHasEmittedToolCalls = false;
-  // R2 P1 #4: track native-call suppression separately from the ledger.
-  // `passthroughToolCalls.size > 0` is wrong because DSML calls themselves
-  // land in the same map — the first DSML call would suppress the second.
-  let dsmlSuppressedByNativeCalls = false;
+  const dsmlPendingCalls: DsmlToolCall[] = [];
   // Passthrough Responses SSE: snapshots of items seen via `response.output_item.done`,
   // used to backfill `response.completed.response.output` when upstream returns it
   // empty (which happens when `store: false` — see backfillResponsesCompletedOutput).
@@ -889,19 +890,66 @@ export function createSSEStream(options: StreamOptions = {}) {
     passthroughEventPrefix.clear();
   };
 
-  /**
-   * DSML streaming guard: buffers content that may hold a (partial) DSML
-   * tool_calls block. When the closing tag arrives, parses the block and
-   * converts it into a wire tool_calls delta via
-   * `toChatCompletionChunkWithToolCall` (same shape as the textual guard —
-   * the converted chunk is RETURNED, the caller re-serializes it because the
-   * `converted` flag drives the `textualToolCallConverted` branch). Incomplete
-   * DSML stays buffered; malformed DSML falls back to plain text losslessly.
-   * Plain content (no DSML markers) flows through untouched.
-   *
-   * Content accumulation for the call log is NOT done here — the main loop
-   * accumulates `delta.content` itself; mutating the delta here is enough.
-   */
+  // Synthetic calls cannot be retracted from the wire. Wait for the terminal
+  // boundary so native calls arriving later (including argument fragments) win.
+  const toolCallSignature = (name: string, args: unknown): string => {
+    const canonicalize = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(canonicalize);
+      if (value && typeof value === "object") {
+        return Object.fromEntries(
+          Object.entries(value)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([key, item]) => [key, canonicalize(item)])
+        );
+      }
+      return value;
+    };
+    return JSON.stringify([name, canonicalize(args)]);
+  };
+
+  const emitPendingDsml = (controller: TransformStreamDefaultController) => {
+    if (!dsmlToolCallsEnabled) return;
+    if (dsmlBufferedContent) {
+      const content = dsmlBufferedContent;
+      dsmlBufferedContent = "";
+      passthroughAccumulatedContent = appendBoundedText(passthroughAccumulatedContent, content);
+      const chunk = buildSyntheticChatChunk(passthroughResponsesId, model, { content });
+      const output = `data: ${JSON.stringify(chunk)}\n\n`;
+      clientPayloadCollector.push(chunk);
+      reqLogger?.appendConvertedChunk?.(output);
+      controller.enqueue(encoder.encode(output));
+    }
+    if (!dsmlPendingCalls.length) return;
+    const nativeSignatures = new Set<string>();
+    for (const call of passthroughToolCalls.values()) {
+      try {
+        nativeSignatures.add(
+          toolCallSignature(call.function.name, JSON.parse(call.function.arguments))
+        );
+      } catch {
+        // Unfinished native arguments cannot establish equivalence to a DSML call.
+      }
+    }
+    const collected: ToolCall[] = [];
+    for (const call of dsmlPendingCalls) {
+      if (nativeSignatures.has(toolCallSignature(call.name, call.args))) continue;
+      const toolCall = collectDsmlTextualToolCall(call, passthroughToolCalls);
+      if (toolCall) collected.push(toolCall);
+    }
+    dsmlPendingCalls.length = 0;
+    if (!collected.length) return;
+    passthroughHasToolCalls = true;
+    const chunk = toChatCompletionChunkWithMultiToolCalls(
+      buildSyntheticChatChunk(passthroughResponsesId, model, {}),
+      collected
+    );
+    const output = `data: ${JSON.stringify(chunk)}\n\n`;
+    clientPayloadCollector.push(chunk);
+    reqLogger?.appendConvertedChunk?.(output);
+    controller.enqueue(encoder.encode(output));
+  };
+
+  /** Release source prose once and retain only an incomplete DSML suffix. */
   const applyDsmlToolCallStreamingGuard = (
     parsed: Record<string, unknown>
   ): { parsed: Record<string, unknown>; converted: boolean } => {
@@ -912,112 +960,27 @@ export function createSSEStream(options: StreamOptions = {}) {
     const delta = asRecord(choice?.delta);
     const incomingRaw: unknown = delta?.content;
     if (typeof incomingRaw !== "string") return { parsed, converted: false };
-    const incoming: string = incomingRaw;
-
-    // Fast path: no DSML markers anywhere (buffer + incoming) → pass through.
-    if (
-      !dsmlBufferedContent &&
-      !incoming.includes(DSML_OPEN_TAG) &&
-      !incoming.includes(DSML_CLOSE_TAG) &&
-      !mayStartDsmlTag(incoming)
-    ) {
+    if (!dsmlBufferedContent && !incomingRaw.includes("<")) {
       return { parsed, converted: false };
     }
-
-    // Unlimited buffer (plain concat, not appendBoundedText): DSML args can
-    // exceed 64 KiB and must never be silently truncated (R2 P1 #5).
-    // Safety cap: if the buffer exceeds 10 MB without a close tag, flush it
-    // losslessly as plain text to prevent unbounded memory growth.
-    dsmlBufferedContent += incoming;
-    delta.content = "";
-
+    dsmlBufferedContent += incomingRaw;
+    const { calls, remainder, pendingStart } = extractDsmlBlocks(dsmlBufferedContent);
+    for (const call of calls) {
+      if (!allowedToolNames?.size || allowedToolNames.has(call.name)) dsmlPendingCalls.push(call);
+    }
+    // Completed blocks must not evict a partial second block in the same delta.
+    const pending = pendingStart === undefined ? "" : dsmlBufferedContent.slice(pendingStart);
+    let released = pending ? remainder.slice(0, remainder.length - pending.length) : remainder;
+    dsmlBufferedContent = pending;
     const DSML_BUFFER_LIMIT = 10 * 1024 * 1024;
     if (dsmlBufferedContent.length > DSML_BUFFER_LIMIT) {
-      // Unreasonably large unclosed buffer — treat as plain prose, never
-      // attempt to parse an evicted suffix as DSML (R2 P1 #5).
-      delta.content = dsmlBufferedContent;
+      // Lossless fallback for an oversized incomplete block; never truncate args.
+      released += dsmlBufferedContent;
       dsmlBufferedContent = "";
-      return { parsed, converted: true };
     }
-
-    if (!dsmlBufferedContent.includes(DSML_CLOSE_TAG)) {
-      // Still incomplete — release any safe prefix (text before any DSML open
-      // tag) so ordinary prose is not held hostage.
-      const firstOpen = dsmlBufferedContent.indexOf(DSML_OPEN_TAG);
-      if (firstOpen > 0) {
-        delta.content = dsmlBufferedContent.slice(0, firstOpen);
-        dsmlBufferedContent = dsmlBufferedContent.slice(firstOpen);
-      } else if (firstOpen === -1 && !mayStartDsmlTag(dsmlBufferedContent)) {
-        delta.content = dsmlBufferedContent;
-        dsmlBufferedContent = "";
-      }
-      return { parsed, converted: true };
-    }
-
-    // Closing tag present — extract all complete valid blocks; malformed or
-    // partial blocks stay in the remainder as plain text (lossless).
-    const { calls, remainder } = extractDsmlBlocks(dsmlBufferedContent);
-    dsmlBufferedContent = "";
-
-    // R2 P2 #10: accumulate any released prose into the call log so the
-    // completion body matches what was sent on the wire. The main loop skips
-    // its own accumulation when textualToolCallConverted is true.
-    if (remainder) {
-      passthroughAccumulatedContent = appendBoundedText(passthroughAccumulatedContent, remainder);
-    }
-
-    if (calls.length > 0) {
-      // Respect the same admission policy as textual tool calls.
-      const admitted = calls.filter(
-        (call) => !allowedToolNames?.size || allowedToolNames.has(call.name)
-      );
-
-      if (admitted.length > 0 && !dsmlSuppressedByNativeCalls) {
-        // Emit ALL admitted calls in a single delta.tool_calls array so no
-        // call is silently dropped (R2 P1 #3: multi-invoke per event).
-        const collected: ToolCall[] = [];
-        for (const call of admitted) {
-          const tc = collectDsmlTextualToolCall(call, passthroughToolCalls);
-          if (tc) collected.push(tc);
-        }
-        if (collected.length > 0) {
-          parsed = toChatCompletionChunkWithMultiToolCalls(parsed, collected);
-          passthroughHasToolCalls = true;
-          dsmlHasEmittedToolCalls = true;
-        }
-        // remainder becomes the plain-text content of this chunk
-        if (delta) delta.content = remainder || "";
-        return { parsed, converted: true };
-      }
-
-      // All calls filtered out or suppressed by native — remainder goes out as
-      // plain prose so nothing is lost.
-      if (delta) delta.content = remainder || "";
-      return { parsed, converted: true };
-    }
-
-    // No valid calls extracted — remainder (which includes any malformed or
-    // partial block text verbatim) goes out as plain content (R2 P1 #1, #2).
-    if (delta) delta.content = remainder || "";
+    delta.content = released;
+    passthroughAccumulatedContent = appendBoundedText(passthroughAccumulatedContent, released);
     return { parsed, converted: true };
-  };
-
-  /** True when the tail of `text` could be the beginning of a DSML tag. */
-  const mayStartDsmlTag = (text: string): boolean => {
-    // Only match a genuine DSML prefix tail — a bare "<" in ordinary prose
-    // like "2 < 3" must NOT be buffered (R2 P1 #7).
-    if (!text.includes("\uFF5c")) return false;
-    const tail = text.slice(-24);
-    return "<\uFF5cDSML\uFF5c".startsWith(tail) || tail.includes("<\uFF5cDSML\uFF5c");
-  };
-
-  /** Remove all complete DSML tool_calls blocks from `text`, returning the rest. */
-  const stripDsmlBlocks = (text: string): string => {
-    const re = new RegExp(
-      "<\uFF5cDSML\uFF5ctool_calls\\s*>[\\s\\S]*?</\uFF5cDSML\uFF5ctool_calls\\s*>",
-      "gi"
-    );
-    return text.replace(re, "").trim();
   };
 
   const applyTextualToolCallStreamingGuard = (parsed: Record<string, unknown>) => {
@@ -1943,9 +1906,6 @@ export function createSSEStream(options: StreamOptions = {}) {
 
                   // T18: Track if we saw tool calls & accumulate for call log
                   if (delta?.tool_calls && delta.tool_calls.length > 0) {
-                    // R2 P1 #4: mark that NATIVE tool_calls exist so the DSML
-                    // guard suppresses duplicate DSML conversion for this stream.
-                    dsmlSuppressedByNativeCalls = true;
                     passthroughHasToolCalls = true;
                     lastToolCallChunkTime = now;
                     for (const tc of delta.tool_calls) {
@@ -2040,6 +2000,7 @@ export function createSSEStream(options: StreamOptions = {}) {
                   const isFinishChunk = parsed.choices?.[0]?.finish_reason;
 
                   if (isFinishChunk) {
+                    emitPendingDsml(controller);
                     passthroughSawFinishReason = true;
                   }
 
@@ -2346,6 +2307,15 @@ export function createSSEStream(options: StreamOptions = {}) {
         try {
           const remaining = decoder.decode();
           if (remaining) buffer += remaining;
+          // Reuse the regular guard, native-call tracking and content accounting
+          // for a final Chat Completions delta without an SSE line terminator.
+          if (mode === STREAM_MODE.PASSTHROUGH && dsmlToolCallsEnabled && buffer.trim()) {
+            const tailPayload = parseSSELine(buffer.trim());
+            if (Array.isArray(tailPayload?.choices)) {
+              await this.transform(encoder.encode("\n\n"), controller);
+              clearIdleTimer();
+            }
+          }
           let normalizedTailLines: string[] = [];
           if (multilineSseDataLineNormalizer.hasPending()) {
             const tailLines = buffer ? [buffer, ""] : [""];
@@ -2519,6 +2489,8 @@ export function createSSEStream(options: StreamOptions = {}) {
             }
             clearPendingPassthroughEvent();
 
+            emitPendingDsml(controller);
+
             if (passthroughBufferedTextualToolCallContent) {
               // Flush any remaining buffered content as plain text.
               // Previously gated on !includes("Arguments:"), which silently dropped
@@ -2617,7 +2589,9 @@ export function createSSEStream(options: StreamOptions = {}) {
                 const u = usage as Record<string, unknown> | null;
                 const prompt = Number(u?.prompt_tokens ?? u?.input_tokens ?? 0);
                 const completion = Number(u?.completion_tokens ?? u?.output_tokens ?? 0);
-                let content = passthroughAccumulatedContent.trim() || "";
+                let content = dsmlToolCallsEnabled
+                  ? passthroughAccumulatedContent
+                  : passthroughAccumulatedContent.trim() || "";
                 const finalBufferedTextualToolCall =
                   passthroughBufferedTextualToolCallContent.trim();
                 if (finalBufferedTextualToolCall) {

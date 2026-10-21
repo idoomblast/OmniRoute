@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-const { parseDsmlToolCalls } = await import("../../open-sse/utils/dsmlToolCall.ts");
+const { parseDsmlToolCalls, extractDsmlBlocks } =
+  await import("../../open-sse/utils/dsmlToolCall.ts");
 const { sanitizeOpenAIResponse } = await import("../../open-sse/handlers/responseSanitizer.ts");
 
 const DSML_SINGLE = `Before text.
@@ -272,4 +273,71 @@ test("sanitizeOpenAIResponse malformed-parameter DSML falls back losslessly (non
   ) as Record<string, any>;
   assert.equal(out.choices[0].message.content, s);
   assert.equal(out.choices[0].message.tool_calls, undefined);
+});
+
+const BOUNDARY_BLOCK =
+  '<｜DSML｜tool_calls><｜DSML｜invoke name="terminal"><｜DSML｜parameter name="command">pwd</｜DSML｜parameter></｜DSML｜invoke></｜DSML｜tool_calls>';
+
+for (const tag of ["tool_calls", "invoke", "parameter"]) {
+  for (const closing of [false, true]) {
+    for (const suffix of ["_BAD", "Extra", "0"]) {
+      const prefix = `<${closing ? "/" : ""}｜DSML｜${tag}`;
+      const malformed = BOUNDARY_BLOCK.replace(prefix, prefix + suffix);
+      test(`both DSML entry points reject ${closing ? "closing" : "opening"} ${tag}${suffix}`, () => {
+        assert.equal(parseDsmlToolCalls(malformed), null);
+        const extracted = extractDsmlBlocks(malformed);
+        assert.deepEqual(extracted.calls, []);
+        assert.equal(extracted.remainder, malformed);
+      });
+    }
+  }
+}
+
+for (const tag of ["tool_calls", "invoke", "parameter"]) {
+  test(`both DSML entry points require a complete ${tag} closing tag`, () => {
+    const malformed = BOUNDARY_BLOCK.replace(`</｜DSML｜${tag}>`, `</｜DSML｜${tag}`);
+    assert.equal(parseDsmlToolCalls(malformed), null);
+    const extracted = extractDsmlBlocks(malformed);
+    assert.deepEqual(extracted.calls, []);
+    assert.equal(extracted.remainder, malformed);
+  });
+}
+
+test("extraction preserves rejected outer prefixes before a valid block", () => {
+  const malformed = BOUNDARY_BLOCK.replace("tool_calls>", "tool_calls_BAD>");
+  const extracted = extractDsmlBlocks(`before ${malformed} between ${BOUNDARY_BLOCK} after`);
+  assert.equal(extracted.calls.length, 1);
+  assert.equal(extracted.remainder, `before ${malformed} between  after`);
+});
+
+test("extraction preserves original zero-width characters in rejected text", () => {
+  const malformed = BOUNDARY_BLOCK.replace("parameter>", "parameter_BAD>");
+  const input = `pre\u200B ${malformed.replace("pwd", "p\u200Dw\uFEFFd")} post\u200C`;
+  const extracted = extractDsmlBlocks(input);
+  assert.deepEqual(extracted.calls, []);
+  assert.equal(extracted.remainder, input);
+});
+
+test("extraction recognizes obfuscated tags while retaining exact source slices", () => {
+  const obfuscated = BOUNDARY_BLOCK.replaceAll("<", "<\u200B");
+  const extracted = extractDsmlBlocks(`\u200D before ${obfuscated} after\uFEFF`);
+  assert.equal(extracted.calls.length, 1);
+  assert.equal(extracted.remainder, "\u200D before  after\uFEFF");
+});
+
+test("a malformed invoke does not partially promote valid siblings", () => {
+  const malformed = BOUNDARY_BLOCK.replace(
+    "</｜DSML｜tool_calls>",
+    '<｜DSML｜invoke_BAD name="terminal"></｜DSML｜invoke_BAD></｜DSML｜tool_calls>'
+  );
+  assert.equal(parseDsmlToolCalls(malformed), null);
+  const extracted = extractDsmlBlocks(malformed);
+  assert.deepEqual(extracted.calls, []);
+  assert.equal(extracted.remainder, malformed);
+});
+
+test("exact DSML tags may have whitespace before their closing bracket", () => {
+  const input = BOUNDARY_BLOCK.replaceAll(">", " \t>");
+  assert.equal(parseDsmlToolCalls(input)?.length, 1);
+  assert.equal(extractDsmlBlocks(input).remainder, "");
 });
