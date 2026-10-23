@@ -728,6 +728,7 @@ The logging system writes to both stdout and rotated log files. All configuratio
 | `CHAT_LOG_MAX_DEPTH`                      | `6`                        | Max nesting depth before chat log payloads are truncated.                         |
 | `CHAT_LOG_MAX_OBJECT_KEYS`                | `80`                       | Max object keys retained in chat log payloads (0 = unlimited).                    |
 | `CHAT_DEBUG_FILE`                         | `false`                    | When true, `serializeArtifactForStorage` skips size-based truncation. Debug only. |
+| `CALL_LOG_NO_TRUNCATE`                    | `false`                    | Disables every call-log truncation layer (string length, array tail, depth, object keys, the 8 KB body summary, stream-chunk caps); full payloads are written to disk. |
 
 ---
 

@@ -158,6 +158,17 @@ export function getChatLogMaxObjectKeys(): number {
   return parseNonNegativeInt(process.env.CHAT_LOG_MAX_OBJECT_KEYS, 80);
 }
 
+/**
+ * Kills every truncation layer applied to call-log payloads (string length,
+ * array tail, object keys, nesting depth, the 8 KB body summary, and stream
+ * chunk byte/item caps). Off by default: full payloads can be several MB per
+ * request, so retention (`CALL_LOG_RETENTION_DAYS`, `CALL_LOG_MAX_ENTRIES`)
+ * becomes the only disk bound.
+ */
+export function isCallLogNoTruncate(): boolean {
+  return parseBoolean(process.env.CALL_LOG_NO_TRUNCATE, false);
+}
+
 export function isChatDebugFileEnabled(): boolean {
   if (parseBoolean(process.env.CHAT_DEBUG_FILE, false)) return true;
   return process.env.APP_LOG_LEVEL?.trim().toLowerCase() === "debug";

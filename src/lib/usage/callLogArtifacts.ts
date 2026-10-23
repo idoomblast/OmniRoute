@@ -2,7 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import type { RequestPipelinePayloads } from "@omniroute/open-sse/utils/requestLogger.ts";
 import { resolveDataDir } from "../dataPaths";
-import { getCallLogPipelineMaxSizeBytes, isChatDebugFileEnabled } from "../logEnv";
+import {
+  getCallLogPipelineMaxSizeBytes,
+  isCallLogNoTruncate,
+  isChatDebugFileEnabled,
+} from "../logEnv";
 
 const isCloud = typeof globalThis.caches === "object" && globalThis.caches !== null;
 const isBuildPhase = process.env.NEXT_PHASE === "phase-production-build";
@@ -159,6 +163,10 @@ function serializeArtifactForStorage(artifact: CallLogArtifact): string {
   // Debug mode: write full untruncated payload
   if (isChatDebugFileEnabled()) {
     return JSON.stringify(artifact, null, 2);
+  }
+  // No-truncate mode: full payload, compact (pretty-printing would double the bytes).
+  if (isCallLogNoTruncate()) {
+    return JSON.stringify(artifact);
   }
 
   const maxBytes = getArtifactMaxBytes(artifact);

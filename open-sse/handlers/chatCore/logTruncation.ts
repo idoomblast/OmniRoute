@@ -3,11 +3,27 @@ import {
   getChatLogMaxDepth,
   getChatLogArrayTailItems,
   getChatLogMaxObjectKeys,
+  isCallLogNoTruncate,
 } from "@/lib/logEnv";
 import { estimateSizeFast } from "../../utils/estimateSize.ts";
 
 export const MEMORY_EXTRACTION_TEXT_LIMIT = 64 * 1024;
 const MAX_LOG_BODY_CHARS = 8 * 1024; // 8KB cap for logged request/response bodies
+
+/**
+ * Deep copy used when truncation is disabled: the artifact is serialized later
+ * (saveCallLog is async), so holding a live reference to a body the request
+ * pipeline may still mutate would corrupt the log. structuredClone handles
+ * Buffer/Date/Map; non-cloneable values (functions, class instances) fall back
+ * to the original reference rather than throwing on the logging path.
+ */
+function cloneUnbounded<T>(value: T): T {
+  try {
+    return structuredClone(value);
+  } catch {
+    return value;
+  }
+}
 
 export function capMemoryExtractionText(value: string): string {
   if (value.length <= MEMORY_EXTRACTION_TEXT_LIMIT) return value;
@@ -15,6 +31,7 @@ export function capMemoryExtractionText(value: string): string {
 }
 
 export function truncateChatLogText(value: string): string {
+  if (isCallLogNoTruncate()) return value;
   const limit = getChatLogTextLimit();
   if (value.length <= limit) return value;
   const head = value.slice(0, Math.floor(limit / 2));
@@ -26,6 +43,7 @@ export function cloneBoundedChatLogPayload(value: unknown, depth = 0): unknown {
   if (value === null || value === undefined) return value;
   if (typeof value === "string") return truncateChatLogText(value);
   if (typeof value !== "object") return value;
+  if (isCallLogNoTruncate()) return cloneUnbounded(value);
   if (depth >= getChatLogMaxDepth()) return "[MaxDepth]";
 
   const maxTailItems = getChatLogArrayTailItems();
@@ -75,6 +93,7 @@ export function cloneBoundedChatLogPayload(value: unknown, depth = 0): unknown {
 export function truncateForLog(value: unknown): Record<string, unknown> | null | undefined {
   if (value === null || value === undefined) return value as null | undefined;
   if (typeof value !== "object") return value as unknown as Record<string, unknown>;
+  if (isCallLogNoTruncate()) return value as Record<string, unknown>;
   const estimatedSize = estimateSizeFast(value);
   if (estimatedSize <= MAX_LOG_BODY_CHARS) return value as Record<string, unknown>;
   // Object is too large — return a summary instead of a deep clone

@@ -1,3 +1,4 @@
+import { isCallLogNoTruncate } from "@/lib/logEnv";
 import { getPendingById } from "@/lib/usage/usageHistory";
 import { sanitizeErrorMessage } from "./error.ts";
 
@@ -105,6 +106,21 @@ function createEmptyStreamChunks() {
 const TRUNCATED_ARRAY_MARKER = "_omniroute_truncated_array";
 const TRUNCATED_KEYS_MARKER = "_omniroute_truncated_keys";
 
+/**
+ * Deep copy used when truncation is disabled. The artifact is serialized after
+ * the request completes (saveCallLog is async), so a live reference to a body
+ * the pipeline may still mutate would corrupt the log; structuredClone copies
+ * it, falling back to the reference for non-cloneable values instead of
+ * throwing on the logging path.
+ */
+function cloneUnbounded<T>(value: T): T {
+  try {
+    return structuredClone(value);
+  } catch {
+    return value;
+  }
+}
+
 function isTruncatedArrayMarker(value: unknown): boolean {
   return (
     typeof value === "object" &&
@@ -115,6 +131,7 @@ function isTruncatedArrayMarker(value: unknown): boolean {
 }
 
 function truncateLogString(value: string, maxLength = MAX_LOG_STRING_LENGTH): string {
+  if (isCallLogNoTruncate()) return value;
   if (value.length <= maxLength) return value;
   // The marker has to fit INSIDE the budget (#7847): keeping maxLength characters and then
   // adding the marker produced a result longer than maxLength, so re-bounding an already
@@ -148,6 +165,7 @@ export function cloneBoundedForLog(value: unknown, depth = 0, key: string | null
   if (ArrayBuffer.isView(value)) {
     return `[binary ${(value as ArrayBufferView).byteLength} bytes]`;
   }
+  if (isCallLogNoTruncate()) return cloneUnbounded(value);
   if (depth >= 6) return "[MaxDepth]";
 
   if (Array.isArray(value)) {
@@ -201,6 +219,10 @@ function appendBoundedChunk(
   maxItems = DEFAULT_MAX_STREAM_CHUNK_ITEMS
 ) {
   if (typeof chunk !== "string" || chunk.length === 0) {
+    return;
+  }
+  if (isCallLogNoTruncate()) {
+    chunks.push(chunk);
     return;
   }
   if (chunks.length >= maxItems) {
