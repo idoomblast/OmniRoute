@@ -9,25 +9,17 @@
  *   - Weekly:            $30 of usage
  *   - Monthly:           $60 of usage
  *
- * Upstream endpoint (defensive — no public API exists yet):
- *   GET https://opencode.ai/zen/go/v1/quota
- *   Authorization: Bearer <apiKey>
+ * Upstream endpoints:
+ *   - opencode-go: GET https://opencode.ai/console/api/go/status
+ *       Auth: `__Host-console_session` cookie + `x-org-id: wrk_...`
+ *       Response: access.meters.{fiveHour,week,month} (micro-cents)
+ *   - opencode / opencode-zen: GET https://opencode.ai/zen/go/v1/quota
+ *       Auth: Bearer <apiKey> (still HTTP 404 upstream — no public API yet)
  *
- * Expected response shape:
- *   {
- *     quota: {
- *       window_5h:      { used: number, limit: number, reset_at: number | null },
- *       window_weekly:  { used: number, limit: number, reset_at: number | null },
- *       window_monthly: { used: number, limit: number, reset_at: number | null }
- *     }
- *   }
- *
- * NOTE: As of 2026, no public quota API exists for OpenCode Go / OpenCode Zen
- * (tracked upstream in anomalyco/opencode#16017, #18648, #31084). The default
- * endpoint currently returns HTTP 404. This fetcher is implemented defensively
- * so that the dashboard shows "No quota data" gracefully rather than crashing,
- * and so that when an endpoint is finally published, only the URL constant
- * needs to change.
+ * The console status endpoint is cookie-only: the API key authenticates
+ * chat/models, not the console. Configure the workspace id + console session
+ * cookie on the connection (or via OPENCODE_GO_WORKSPACE_ID /
+ * OPENCODE_GO_AUTH_COOKIE) to enable quota for opencode-go.
  *
  * On a 404 response we log ONE console.warn (latched per process — not per
  * request) pointing at the upstream tracking issues, then cache the
@@ -48,6 +40,12 @@
 import { registerQuotaFetcher, registerQuotaWindows, type QuotaInfo } from "./quotaPreflight.ts";
 import { registerMonitorFetcher } from "./quotaMonitor.ts";
 import { throttleQuotaFetch } from "./quotaFetchThrottle.ts";
+import {
+  fetchOpenCodeGoStatus,
+  resolveOpenCodeGoStatusConfig,
+  type OpenCodeGoMeter,
+  type OpenCodeGoStatus,
+} from "./opencodeGoStatus.ts";
 
 // OpenCode quota endpoint — same key works across opencode, opencode-go, opencode-zen
 // Default points at /zen/go/v1/quota which returns 404 today (no public quota API yet,
@@ -324,6 +322,90 @@ export async function fetchOpencodeQuota(
   }
 }
 
+// ─── OpenCode Go console status (cookie auth) ─────────────────────────────────
+
+const CONSOLE_CACHE_SUFFIX = ":console";
+
+function toQuotaWindow(meter: OpenCodeGoMeter | null) {
+  return {
+    percentUsed: meter ? meter.percentUsed : 0,
+    resetAt: meter ? meter.resetAt : null,
+  };
+}
+
+function buildTripleWindowFromStatus(status: OpenCodeGoStatus): OpencodeTripleWindowQuota {
+  const window5h = toQuotaWindow(status.session);
+  const windowWeekly = toQuotaWindow(status.weekly);
+  const windowMonthly = toQuotaWindow(status.monthly);
+
+  const worstPercent = Math.max(
+    window5h.percentUsed,
+    windowWeekly.percentUsed,
+    windowMonthly.percentUsed
+  );
+
+  const windows: Record<string, { percentUsed: number; resetAt: string | null }> = {};
+  if (status.session) windows[OPENCODE_WINDOW_5H] = window5h;
+  if (status.weekly) windows[OPENCODE_WINDOW_WEEKLY] = windowWeekly;
+  if (status.monthly) windows[OPENCODE_WINDOW_MONTHLY] = windowMonthly;
+
+  let dominantResetAt: string | null = null;
+  if (worstPercent === window5h.percentUsed) {
+    dominantResetAt = window5h.resetAt ?? windowWeekly.resetAt ?? windowMonthly.resetAt;
+  } else if (worstPercent === windowWeekly.percentUsed) {
+    dominantResetAt = windowWeekly.resetAt ?? window5h.resetAt ?? windowMonthly.resetAt;
+  } else {
+    dominantResetAt = windowMonthly.resetAt ?? windowWeekly.resetAt ?? window5h.resetAt;
+  }
+
+  return {
+    used: worstPercent * 100,
+    total: 100,
+    percentUsed: worstPercent,
+    resetAt: dominantResetAt,
+    windows,
+    window5h,
+    windowWeekly,
+    windowMonthly,
+    limitReached: status.limitReached,
+  };
+}
+
+/**
+ * opencode-go quota via the console status API (cookie auth).
+ *
+ * The console session (`__Host-console_session`) is the only credential that
+ * can read `access.meters`; the API key is chat-only. When no console
+ * credentials are configured we fall back to the legacy API-key endpoint so
+ * existing deployments keep their previous behavior.
+ */
+export async function fetchOpencodeGoQuota(
+  connectionId: string,
+  connection?: Record<string, unknown>
+): Promise<OpencodeTripleWindowQuota | null> {
+  const cacheKey = `${connectionId}${CONSOLE_CACHE_SUFFIX}`;
+  const cached = quotaCache.get(cacheKey);
+  if (cached?.quota && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
+    return cached.quota;
+  }
+
+  const providerSpecificData =
+    connection && typeof connection.providerSpecificData === "object"
+      ? (connection.providerSpecificData as Record<string, unknown>)
+      : undefined;
+  const config = resolveOpenCodeGoStatusConfig(providerSpecificData);
+  if (config.state === "configured") {
+    const result = await fetchOpenCodeGoStatus(config);
+    if (result.ok) {
+      const quota = buildTripleWindowFromStatus(result.status);
+      quotaCache.set(cacheKey, { quota, fetchedAt: Date.now() });
+      return quota;
+    }
+  }
+
+  return fetchOpencodeQuota(connectionId, connection);
+}
+
 // ─── Invalidation ─────────────────────────────────────────────────────────────
 
 /**
@@ -331,6 +413,7 @@ export async function fetchOpencodeQuota(
  */
 export function invalidateOpencodeQuotaCache(connectionId: string): void {
   quotaCache.delete(connectionId);
+  quotaCache.delete(`${connectionId}${CONSOLE_CACHE_SUFFIX}`);
 }
 
 // ─── Registration ─────────────────────────────────────────────────────────────
@@ -342,13 +425,18 @@ export function invalidateOpencodeQuotaCache(connectionId: string): void {
  * Call this once at server startup (in chat.ts, before registerGenericQuotaFetchers).
  */
 export function registerOpencodeQuotaFetcher(): void {
-  for (const provider of ["opencode-go", "opencode", "opencode-zen"] as const) {
+  const windows = [OPENCODE_WINDOW_5H, OPENCODE_WINDOW_WEEKLY, OPENCODE_WINDOW_MONTHLY];
+
+  // opencode-go: console status API first (workspace id + session cookie),
+  // legacy API-key endpoint as the fallback.
+  registerQuotaFetcher("opencode-go", fetchOpencodeGoQuota);
+  registerMonitorFetcher("opencode-go", fetchOpencodeGoQuota);
+  registerQuotaWindows("opencode-go", windows);
+
+  // opencode / opencode-zen keep the legacy API-key path only.
+  for (const provider of ["opencode", "opencode-zen"] as const) {
     registerQuotaFetcher(provider, fetchOpencodeQuota);
     registerMonitorFetcher(provider, fetchOpencodeQuota);
-    registerQuotaWindows(provider, [
-      OPENCODE_WINDOW_5H,
-      OPENCODE_WINDOW_WEEKLY,
-      OPENCODE_WINDOW_MONTHLY,
-    ]);
+    registerQuotaWindows(provider, windows);
   }
 }

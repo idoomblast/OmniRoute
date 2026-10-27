@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  fetchOpencodeGoQuota,
   fetchOpencodeQuota,
   invalidateOpencodeQuotaCache,
   registerOpencodeQuotaFetcher,
@@ -363,6 +364,74 @@ test("registerOpencodeQuotaFetcher registers opencode-go in quotaMonitor system"
 
   stopQuotaMonitor("session-oc");
   assert.equal(getActiveMonitorCount(), 0);
+
+  invalidateOpencodeQuotaCache(connectionId);
+});
+
+// ─── opencode-go console status (cookie auth) ──────────────────────────────
+
+test("fetchOpencodeGoQuota reads access.meters from the console status API", async () => {
+  const connectionId = `oc-console-${Date.now()}`;
+  let requestUrl = "";
+  let requestHeaders: Headers | null = null;
+
+  globalThis.fetch = async (input, init) => {
+    requestUrl = String(input);
+    requestHeaders = new Headers(init?.headers as HeadersInit | undefined);
+    return new Response(
+      JSON.stringify({
+        product: "go",
+        access: {
+          meters: {
+            fiveHour: {
+              resetsAt: "2026-10-27T16:15:30.000Z",
+              limitMicroCents: "1200000000",
+              usedMicroCents: "600000000",
+            },
+            week: { limitMicroCents: "3000000000", usedMicroCents: "3000000000" },
+            month: { limitMicroCents: "6000000000", usedMicroCents: "0" },
+          },
+        },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+  };
+
+  const quota = await fetchOpencodeGoQuota(connectionId, {
+    apiKey: "sk-chat-only",
+    providerSpecificData: {
+      opencodeGoWorkspaceId: "wrk_test",
+      opencodeGoAuthCookie: "st_test",
+    },
+  });
+
+  assert.equal(requestUrl, "https://opencode.ai/console/api/go/status");
+  assert.equal(requestHeaders?.get("x-org-id"), "wrk_test");
+  assert.equal(requestHeaders?.get("Cookie"), "__Host-console_session=st_test");
+  assert.ok(quota);
+  assert.equal(quota.percentUsed, 1);
+  assert.equal(quota.window5h.percentUsed, 0.5);
+  assert.equal(quota.window5h.resetAt, "2026-10-27T16:15:30.000Z");
+  assert.equal(quota.windowWeekly.percentUsed, 1);
+  assert.equal(quota.limitReached, true);
+  assert.deepEqual(Object.keys(quota.windows), ["window_5h", "window_weekly", "window_monthly"]);
+
+  invalidateOpencodeQuotaCache(connectionId);
+});
+
+test("fetchOpencodeGoQuota falls back to the API-key path without console credentials", async () => {
+  const connectionId = `oc-console-fallback-${Date.now()}`;
+  let requestUrl = "";
+
+  globalThis.fetch = async (input) => {
+    requestUrl = String(input);
+    return new Response(null, { status: 404 });
+  };
+
+  const quota = await fetchOpencodeGoQuota(connectionId, { apiKey: "sk-test-key" });
+
+  assert.equal(requestUrl, "https://opencode.ai/zen/go/v1/quota");
+  assert.equal(quota, null);
 
   invalidateOpencodeQuotaCache(connectionId);
 });

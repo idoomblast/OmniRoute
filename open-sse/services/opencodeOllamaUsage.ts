@@ -1,4 +1,10 @@
 import { sanitizeErrorMessage } from "../utils/error.ts";
+import {
+  fetchOpenCodeGoStatus,
+  resolveOpenCodeGoStatusConfig,
+  type OpenCodeGoMeter,
+  type OpenCodeGoStatus,
+} from "./opencodeGoStatus.ts";
 
 type JsonRecord = Record<string, unknown>;
 type UsageQuota = {
@@ -42,9 +48,7 @@ type OllamaCloudUsage = {
   planTier?: string | null;
 };
 type OllamaCloudConfig =
-  | { state: "configured"; cookie: string }
-  | { state: "invalid"; error: string }
-  | { state: "none" };
+  { state: "configured"; cookie: string } | { state: "invalid"; error: string } | { state: "none" };
 
 function toRecord(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : {};
@@ -106,29 +110,11 @@ function getProviderSpecificString(data: JsonRecord | undefined, keys: string[])
 function resolveOpenCodeGoDashboardConfig(
   providerSpecificData?: JsonRecord
 ): OpenCodeGoDashboardConfig {
-  const workspaceId =
-    process.env.OMNIROUTE_OPENCODE_GO_WORKSPACE_ID?.trim() ||
-    process.env.OPENCODE_GO_WORKSPACE_ID?.trim() ||
-    getProviderSpecificString(providerSpecificData, [
-      "openCodeGoWorkspaceId",
-      "opencodeGoWorkspaceId",
-      "workspaceId",
-    ]);
-  const authCookie =
-    process.env.OMNIROUTE_OPENCODE_GO_AUTH_COOKIE?.trim() ||
-    process.env.OPENCODE_GO_AUTH_COOKIE?.trim() ||
-    getProviderSpecificString(providerSpecificData, [
-      "openCodeGoAuthCookie",
-      "opencodeGoAuthCookie",
-      "authCookie",
-    ]);
-
-  if (!workspaceId && !authCookie) return { state: "none" };
-  if (workspaceId && authCookie) return { state: "configured", workspaceId, authCookie };
-  return {
-    state: "incomplete",
-    missing: workspaceId ? "OPENCODE_GO_AUTH_COOKIE" : "OPENCODE_GO_WORKSPACE_ID",
-  };
+  const config = resolveOpenCodeGoStatusConfig(providerSpecificData);
+  if (config.state === "configured") {
+    return { state: "configured", workspaceId: config.workspaceId, authCookie: config.cookie };
+  }
+  return config;
 }
 
 function normalizeOpenCodeGoAuthCookie(value: string): string {
@@ -163,9 +149,15 @@ function buildOpenCodeGoDollarQuota(
   percentage: unknown,
   resetAt: string | null,
   usedOverride?: unknown,
-  details?: UsageQuota["details"]
+  details?: UsageQuota["details"],
+  totalOverride?: unknown
 ): UsageQuota {
-  const total = OPENCODE_GO_QUOTA_TOTALS[quotaName];
+  const defaultTotal = OPENCODE_GO_QUOTA_TOTALS[quotaName];
+  const totalOverrideValue = toNumber(totalOverride, Number.NaN);
+  const total =
+    Number.isFinite(totalOverrideValue) && totalOverrideValue > 0
+      ? roundCurrency(totalOverrideValue)
+      : defaultTotal;
   const percentUsed = toPercentage(percentage);
   const rawUsed = toNumber(usedOverride, Number.NaN);
   const used = roundCurrency(
@@ -301,6 +293,27 @@ async function fetchOpenCodeGoDashboardUsage(
   };
 }
 
+function buildOpenCodeGoStatusQuotas(status: OpenCodeGoStatus): Record<string, UsageQuota> {
+  const quotas: Record<string, UsageQuota> = {};
+  const meters: Array<[OpenCodeGoQuotaName, OpenCodeGoMeter | null]> = [
+    ["session", status.session],
+    ["weekly", status.weekly],
+    ["mcp_monthly", status.monthly],
+  ];
+  for (const [quotaName, meter] of meters) {
+    if (!meter) continue;
+    quotas[quotaName] = buildOpenCodeGoDollarQuota(
+      quotaName,
+      meter.percentUsed * 100,
+      meter.resetAt,
+      meter.usedUsd,
+      undefined,
+      meter.limitUsd
+    );
+  }
+  return quotas;
+}
+
 export async function getOpenCodeGoUsage(apiKey: string, providerSpecificData?: JsonRecord) {
   const dashboardConfig = resolveOpenCodeGoDashboardConfig(providerSpecificData);
   if (dashboardConfig.state === "incomplete") {
@@ -309,10 +322,28 @@ export async function getOpenCodeGoUsage(apiKey: string, providerSpecificData?: 
     };
   }
   if (dashboardConfig.state === "configured") {
+    // The console JSON endpoint is authoritative. The HTML dashboard no longer
+    // ships quota windows server-side, so scraping is only a last-resort
+    // fallback for deployments that still render the old page.
+    const statusResult = await fetchOpenCodeGoStatus({
+      state: "configured",
+      workspaceId: dashboardConfig.workspaceId,
+      cookie: dashboardConfig.authCookie,
+    });
+    if (statusResult.ok) {
+      return {
+        plan: statusResult.status.plan ?? "OpenCode Go",
+        quotas: orderOpenCodeGoQuotas(buildOpenCodeGoStatusQuotas(statusResult.status)),
+        limitReached: statusResult.status.limitReached,
+      };
+    }
+    if (statusResult.reason === "unauthorized" || statusResult.reason === "invalid-cookie") {
+      return { message: statusResult.message };
+    }
     try {
       const dashboard = await fetchOpenCodeGoDashboardUsage(dashboardConfig);
       if (!dashboard.usage) {
-        return { message: dashboard.message || "OpenCode Go dashboard quota data unavailable." };
+        return { message: dashboard.message || statusResult.message };
       }
       const quotas: Record<string, UsageQuota> = {};
       for (const quotaName of OPENCODE_GO_QUOTA_ORDER) {

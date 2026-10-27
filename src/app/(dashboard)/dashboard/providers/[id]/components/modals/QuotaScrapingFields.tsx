@@ -53,28 +53,28 @@ export default function QuotaScrapingFields({
           name="opencodeGoWorkspaceId"
           value={values.opencodeGoWorkspaceId}
           onChange={(e) => onChange({ opencodeGoWorkspaceId: e.target.value })}
-          placeholder="workspace_..."
+          placeholder="wrk_..."
           hint={providerText(
             t,
             "opencodeGoWorkspaceIdHint",
-            "Required for quota scraping. Copy it from the OpenCode Go workspace URL."
+            "Required for quota. Copy the wrk_... id from the console URL (opencode.ai/console/wrk_.../go)."
           )}
           autoComplete="off"
           spellCheck={false}
         />
         <Input
-          label={providerText(t, "opencodeGoAuthCookieLabel", "OpenCode Go auth cookie")}
+          label={providerText(t, "opencodeGoAuthCookieLabel", "OpenCode Go console cookie")}
           name="opencodeGoAuthCookie"
           type="password"
           value={values.opencodeGoAuthCookie}
           onChange={(e) => onChange({ opencodeGoAuthCookie: e.target.value })}
-          placeholder="auth=..."
+          placeholder="__Host-console_session=st_..."
           hint={providerText(
             t,
             "opencodeGoAuthCookieHint",
             editMode
-              ? "Leave blank to keep the stored cookie. Paste auth=... or only the cookie value to replace it."
-              : "Paste the auth cookie value from opencode.ai. The auth= prefix is accepted."
+              ? "Leave blank to keep the stored cookie. Paste __Host-console_session=... (or the full Cookie header) to replace it."
+              : "Required for quota. Copy the __Host-console_session cookie from opencode.ai/console (DevTools → Application → Cookies). The API key cannot read quota."
           )}
           autoComplete="off"
           spellCheck={false}
