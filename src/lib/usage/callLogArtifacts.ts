@@ -160,13 +160,15 @@ function serializeFinalSizeLimitFallback(artifact: CallLogArtifact, maxBytes: nu
 }
 
 function serializeArtifactForStorage(artifact: CallLogArtifact): string {
-  // Debug mode: write full untruncated payload
-  if (isChatDebugFileEnabled()) {
-    return JSON.stringify(artifact, null, 2);
-  }
-  // No-truncate mode: full payload, compact (pretty-printing would double the bytes).
+  // No-truncate mode wins over debug pretty-printing: it exists specifically to keep
+  // full payloads on disk, so pretty-printing (which roughly doubles bytes) would
+  // defeat its purpose. Debug mode still pretty-prints when no-truncate is off.
   if (isCallLogNoTruncate()) {
     return JSON.stringify(artifact);
+  }
+  // Debug mode: write full untruncated payload, pretty-printed for human inspection.
+  if (isChatDebugFileEnabled()) {
+    return JSON.stringify(artifact, null, 2);
   }
 
   const maxBytes = getArtifactMaxBytes(artifact);
