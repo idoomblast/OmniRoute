@@ -1,5 +1,14 @@
 export const PAYLOAD_TREE_MAX_CHARS = 131072;
 
+export function parsePayloadTreeMaxChars(raw: string | null | undefined): number {
+  const value = (raw ?? "").trim();
+  if (!/^\d+$/.test(value)) {
+    return PAYLOAD_TREE_MAX_CHARS;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : PAYLOAD_TREE_MAX_CHARS;
+}
+
 export const PAYLOAD_EDITOR_FAILURE_MESSAGE = "PayloadJsonEditor: viewer unavailable";
 
 export type PayloadEditorMode = "tree" | "text";
@@ -16,11 +25,15 @@ export function isValidJson(text: string | null | undefined): boolean {
   }
 }
 
-export function resolvePayloadEditorMode(jsonText: string | null | undefined): PayloadEditorMode {
+export function resolvePayloadEditorMode(
+  jsonText: string | null | undefined,
+  maxChars: number = PAYLOAD_TREE_MAX_CHARS
+): PayloadEditorMode {
   if (typeof jsonText !== "string") {
     return "text";
   }
-  if (jsonText.length > PAYLOAD_TREE_MAX_CHARS) {
+  const limit = Number.isSafeInteger(maxChars) && maxChars >= 0 ? maxChars : PAYLOAD_TREE_MAX_CHARS;
+  if (jsonText.length > limit) {
     return "text";
   }
   return isValidJson(jsonText) ? "tree" : "text";

@@ -31,6 +31,8 @@ const PUBLIC_READONLY_API_ROUTE_PREFIXES = [
   "/api/health/ping",
   "/api/monitoring/health",
   "/api/settings/require-login",
+  // Call-log payload viewer display limit; non-sensitive UI configuration.
+  "/api/config/payload-editor",
 ];
 
 const PUBLIC_READONLY_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);

@@ -34,6 +34,11 @@ test("isPublicApiRoute allows readonly health and require-login bootstrap routes
   assert.equal(isPublicApiRoute("/api/settings/require-login", "HEAD"), true);
   assert.equal(isPublicApiRoute("/api/settings/require-login", "OPTIONS"), true);
   assert.equal(isPublicApiRoute("/api/settings/require-login", "POST"), false);
+
+  assert.equal(isPublicApiRoute("/api/config/payload-editor", "GET"), true);
+  assert.equal(isPublicApiRoute("/api/config/payload-editor", "HEAD"), true);
+  assert.equal(isPublicApiRoute("/api/config/payload-editor", "OPTIONS"), true);
+  assert.equal(isPublicApiRoute("/api/config/payload-editor", "POST"), false);
 });
 
 test("isPublicApiRoute rejects non-public management routes", () => {

@@ -5,6 +5,7 @@ import {
   createReadOnlyEditorOptions,
   isBlockedMutationShortcut,
   isValidJson,
+  parsePayloadTreeMaxChars,
   resolvePayloadEditorMode,
 } from "../../src/shared/utils/payloadEditorMode.ts";
 
@@ -52,6 +53,28 @@ test("resolvePayloadEditorMode falls back to text mode for null, undefined, and 
   assert.equal(resolvePayloadEditorMode(undefined), "text");
   assert.equal(resolvePayloadEditorMode(""), "text");
   assert.equal(resolvePayloadEditorMode(12345 as unknown as string), "text");
+});
+
+test("parsePayloadTreeMaxChars accepts non-negative integers and rejects invalid values", () => {
+  assert.equal(parsePayloadTreeMaxChars(undefined), PAYLOAD_TREE_MAX_CHARS);
+  assert.equal(parsePayloadTreeMaxChars(null), PAYLOAD_TREE_MAX_CHARS);
+  assert.equal(parsePayloadTreeMaxChars(""), PAYLOAD_TREE_MAX_CHARS);
+  assert.equal(parsePayloadTreeMaxChars("262144"), 262144);
+  assert.equal(parsePayloadTreeMaxChars(" 2048 "), 2048);
+  assert.equal(parsePayloadTreeMaxChars("0"), 0);
+  assert.equal(parsePayloadTreeMaxChars("-1"), PAYLOAD_TREE_MAX_CHARS);
+  assert.equal(parsePayloadTreeMaxChars("12.5"), PAYLOAD_TREE_MAX_CHARS);
+  assert.equal(parsePayloadTreeMaxChars("not-a-number"), PAYLOAD_TREE_MAX_CHARS);
+  assert.equal(parsePayloadTreeMaxChars("999999999999999999999"), PAYLOAD_TREE_MAX_CHARS);
+});
+
+test("resolvePayloadEditorMode honors a runtime threshold override", () => {
+  const payload = '{"a":1}';
+  assert.equal(resolvePayloadEditorMode(payload, payload.length), "tree");
+  assert.equal(resolvePayloadEditorMode(payload, payload.length - 1), "text");
+  assert.equal(resolvePayloadEditorMode(payload, 0), "text");
+  assert.equal(resolvePayloadEditorMode(payload, 1_000_000), "tree");
+  assert.equal(resolvePayloadEditorMode(payload, Number.NaN), "tree");
 });
 
 test("read-only editor options disable every JSONEditor mutation surface", () => {

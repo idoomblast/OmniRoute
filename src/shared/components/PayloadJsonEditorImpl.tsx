@@ -3,10 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import {
   PAYLOAD_EDITOR_FAILURE_MESSAGE,
+  PAYLOAD_TREE_MAX_CHARS,
   createReadOnlyEditorOptions,
   isBlockedMutationShortcut,
   resolvePayloadEditorMode,
 } from "@/shared/utils/payloadEditorMode";
+import { loadPayloadTreeMaxChars } from "@/shared/utils/payloadEditorConfig";
 import PayloadJsonEditorFallback from "./PayloadJsonEditorFallback";
 import "jsoneditor/dist/jsoneditor.css";
 import "./payloadJsonEditor.css";
@@ -27,9 +29,25 @@ export default function PayloadJsonEditorImpl({ jsonText }: PayloadJsonEditorPro
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [status, setStatus] = useState<ViewerStatus>("loading");
   const [attempt, setAttempt] = useState(0);
-  const mode = resolvePayloadEditorMode(jsonText);
+  const [maxChars, setMaxChars] = useState<number | null>(null);
+  const mode = resolvePayloadEditorMode(jsonText, maxChars ?? PAYLOAD_TREE_MAX_CHARS);
 
   useEffect(() => {
+    let active = true;
+    loadPayloadTreeMaxChars()
+      .then((value) => {
+        if (active) setMaxChars(value);
+      })
+      .catch(() => {
+        if (active) setMaxChars(PAYLOAD_TREE_MAX_CHARS);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (maxChars === null) return;
     let active = true;
     let editor: JSONEditorInstance | null = null;
     const container = containerRef.current;
@@ -122,7 +140,7 @@ export default function PayloadJsonEditorImpl({ jsonText }: PayloadJsonEditorPro
       }
       container?.replaceChildren();
     };
-  }, [jsonText, mode, attempt]);
+  }, [jsonText, mode, attempt, maxChars]);
 
   return (
     <>

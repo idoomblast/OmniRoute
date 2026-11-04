@@ -732,6 +732,7 @@ The logging system writes to both stdout and rotated log files. All configuratio
 | `CHAT_LOG_MAX_OBJECT_KEYS`                | `80`                       | Max object keys retained in chat log payloads (0 = unlimited).                    |
 | `CHAT_DEBUG_FILE`                         | `false`                    | When true, `serializeArtifactForStorage` skips size-based truncation. Debug only. |
 | `CALL_LOG_NO_TRUNCATE`                    | `false`                    | Disables every call-log truncation layer (string length, array tail, depth, object keys, the 8 KB body summary, stream-chunk caps); full payloads are written to disk. |
+| `PAYLOAD_TREE_MAX_CHARS`                  | `131072`                   | Max pretty-printed JSON characters rendered in call-log tree mode; larger payloads use read-only text mode. Read at runtime by `/api/config/payload-editor` (restart to apply, no rebuild). Invalid/negative values use the default. |
 
 ---
 
