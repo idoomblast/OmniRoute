@@ -1,0 +1,203 @@
+/* Scoped overrides for JSONEditor inside OmniRoute payload sections */
+
+.payload-jsoneditor-wrapper {
+  position: relative;
+  width: 100%;
+  height: 37.5rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  overflow: hidden;
+}
+
+.payload-jsoneditor-wrapper .jsoneditor {
+  border: none !important;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
+}
+
+/* Navigation Bar (Breadcrumbs) */
+.payload-jsoneditor-wrapper .jsoneditor-navigation-bar {
+  background-color: var(--color-bg-subtle) !important;
+  border-bottom: 1px solid var(--color-border) !important;
+  color: var(--color-text-muted) !important;
+  font-size: 11px;
+  height: 24px;
+  line-height: 24px;
+  font-family: inherit;
+}
+
+.payload-jsoneditor-wrapper .jsoneditor-treepath {
+  color: var(--color-text-muted) !important;
+}
+
+/* Tree View */
+.payload-jsoneditor-wrapper .jsoneditor-tree {
+  background-color: var(--color-surface) !important;
+  color: var(--color-text-main) !important;
+  padding: 6px 4px;
+}
+
+/* In dark mode, invert the tree expand/collapse icons so they are light */
+.dark .payload-jsoneditor-wrapper div.jsoneditor-tree button.jsoneditor-button {
+  filter: invert(0.85);
+}
+
+.payload-jsoneditor-wrapper div.jsoneditor-tree button.jsoneditor-button:hover,
+.payload-jsoneditor-wrapper div.jsoneditor-tree button.jsoneditor-button:focus {
+  background-color: var(--color-bg-subtle) !important;
+  border-radius: 4px;
+}
+
+/* The read-only viewer has no mutation menu; hide its per-node action buttons. */
+.payload-jsoneditor-wrapper button.jsoneditor-contextmenu-button {
+  display: none !important;
+}
+
+/* Field / Key Styling */
+.payload-jsoneditor-wrapper div.jsoneditor-field {
+  color: var(--color-text-main) !important;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.dark .payload-jsoneditor-wrapper div.jsoneditor-field {
+  color: #93c5fd !important;
+}
+
+/* Syntax Highlighting for Values */
+.payload-jsoneditor-wrapper div.jsoneditor-value {
+  font-size: 12px;
+}
+
+/* String */
+.payload-jsoneditor-wrapper div.jsoneditor-value.jsoneditor-string {
+  color: #16a34a !important;
+}
+.dark .payload-jsoneditor-wrapper div.jsoneditor-value.jsoneditor-string {
+  color: #4ade80 !important;
+}
+
+/* Number */
+.payload-jsoneditor-wrapper div.jsoneditor-value.jsoneditor-number {
+  color: #dc2626 !important;
+}
+.dark .payload-jsoneditor-wrapper div.jsoneditor-value.jsoneditor-number {
+  color: #f87171 !important;
+}
+
+/* Boolean */
+.payload-jsoneditor-wrapper div.jsoneditor-value.jsoneditor-boolean {
+  color: #ea580c !important;
+}
+.dark .payload-jsoneditor-wrapper div.jsoneditor-value.jsoneditor-boolean {
+  color: #fb923c !important;
+}
+
+/* Null */
+.payload-jsoneditor-wrapper div.jsoneditor-value.jsoneditor-null {
+  color: #2563eb !important;
+}
+.dark .payload-jsoneditor-wrapper div.jsoneditor-value.jsoneditor-null {
+  color: #60a5fa !important;
+}
+
+/* URL values render as <a>, not <div>; the div-only rules above miss them. */
+.payload-jsoneditor-wrapper a.jsoneditor-value.jsoneditor-url,
+.payload-jsoneditor-wrapper div.jsoneditor-value.jsoneditor-url {
+  color: #1d4ed8 !important;
+}
+.dark .payload-jsoneditor-wrapper a.jsoneditor-value.jsoneditor-url,
+.dark .payload-jsoneditor-wrapper div.jsoneditor-value.jsoneditor-url {
+  color: #93c5fd !important;
+}
+
+/* Object/array summaries, invalid values, and read-only labels */
+.payload-jsoneditor-wrapper .jsoneditor-readonly,
+.payload-jsoneditor-wrapper .jsoneditor-value.jsoneditor-object,
+.payload-jsoneditor-wrapper .jsoneditor-value.jsoneditor-array,
+.payload-jsoneditor-wrapper .jsoneditor-value.jsoneditor-invalid {
+  color: var(--color-text-muted) !important;
+  font-size: 12px;
+}
+
+/* Separator */
+.payload-jsoneditor-wrapper div.jsoneditor td.jsoneditor-separator {
+  color: var(--color-text-muted) !important;
+  font-size: 12px;
+}
+
+/* Selection and search highlight — readable in both themes. */
+.payload-jsoneditor-wrapper tr.jsoneditor-highlight,
+.payload-jsoneditor-wrapper tr.jsoneditor-selected {
+  background-color: var(--table-row-selected, rgba(99, 102, 241, 0.15)) !important;
+}
+
+.payload-jsoneditor-wrapper div.jsoneditor-field.jsoneditor-highlight,
+.payload-jsoneditor-wrapper div.jsoneditor-value.jsoneditor-highlight {
+  background-color: rgba(37, 99, 235, 0.18) !important;
+  border-color: rgba(37, 99, 235, 0.55) !important;
+  color: var(--color-text-main) !important;
+}
+
+.payload-jsoneditor-wrapper div.jsoneditor-field.jsoneditor-highlight-active,
+.payload-jsoneditor-wrapper div.jsoneditor-value.jsoneditor-highlight-active {
+  background-color: rgba(37, 99, 235, 0.32) !important;
+  border-color: #2563eb !important;
+  color: var(--color-text-main) !important;
+}
+
+/* Type-colored values keep the highlight background readable. */
+.payload-jsoneditor-wrapper div.jsoneditor-value.jsoneditor-string.jsoneditor-highlight,
+.payload-jsoneditor-wrapper div.jsoneditor-value.jsoneditor-number.jsoneditor-highlight,
+.payload-jsoneditor-wrapper div.jsoneditor-value.jsoneditor-boolean.jsoneditor-highlight,
+.payload-jsoneditor-wrapper div.jsoneditor-value.jsoneditor-null.jsoneditor-highlight,
+.payload-jsoneditor-wrapper div.jsoneditor-value.jsoneditor-string.jsoneditor-highlight-active,
+.payload-jsoneditor-wrapper div.jsoneditor-value.jsoneditor-number.jsoneditor-highlight-active,
+.payload-jsoneditor-wrapper div.jsoneditor-value.jsoneditor-boolean.jsoneditor-highlight-active,
+.payload-jsoneditor-wrapper div.jsoneditor-value.jsoneditor-null.jsoneditor-highlight-active {
+  color: var(--color-text-main) !important;
+}
+
+.dark .payload-jsoneditor-wrapper div.jsoneditor-field.jsoneditor-highlight,
+.dark .payload-jsoneditor-wrapper div.jsoneditor-value.jsoneditor-highlight {
+  background-color: rgba(147, 197, 253, 0.22) !important;
+  border-color: rgba(147, 197, 253, 0.6) !important;
+}
+
+.dark .payload-jsoneditor-wrapper div.jsoneditor-field.jsoneditor-highlight-active,
+.dark .payload-jsoneditor-wrapper div.jsoneditor-value.jsoneditor-highlight-active {
+  background-color: rgba(147, 197, 253, 0.36) !important;
+  border-color: #93c5fd !important;
+}
+
+.payload-jsoneditor-wrapper .jsoneditor-results {
+  color: var(--color-text-muted) !important;
+}
+
+/* Text Mode */
+.payload-jsoneditor-wrapper textarea.jsoneditor-text {
+  background-color: var(--color-surface) !important;
+  color: var(--color-text-main) !important;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace !important;
+  font-size: 12px !important;
+  line-height: 1.6 !important;
+  padding: 12px !important;
+  border: none !important;
+}
+
+/* Status Bar in Text Mode */
+.payload-jsoneditor-wrapper .jsoneditor-statusbar {
+  background-color: var(--color-bg-subtle) !important;
+  border-top: 1px solid var(--color-border) !important;
+  color: var(--color-text-muted) !important;
+  font-size: 11px;
+  height: 24px;
+  line-height: 24px;
+}
