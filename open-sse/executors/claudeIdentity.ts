@@ -384,10 +384,11 @@ export function selectBetaFlags(
   // betas it actually asked for. Opaque clients (clientBetaSet === null) keep them all.
   const allowThinking =
     clientBetaSet === null || clientBetaSet.has("interleaved-thinking-2025-05-14");
+  // effort-2025-11-24 must NOT imply advanced-tool-use-2025-11-20 (#9505): Claude
+  // Code sends effort on every request and never sends ATU, so treating effort as
+  // a proxy for ATU force-injects the heavy-agent pair the client never negotiated.
   const allowHeavy =
-    clientBetaSet === null ||
-    clientBetaSet.has("advanced-tool-use-2025-11-20") ||
-    clientBetaSet.has("effort-2025-11-24");
+    clientBetaSet === null || clientBetaSet.has("advanced-tool-use-2025-11-20");
   const hasSystem =
     !!b.system &&
     (typeof b.system === "string" || (Array.isArray(b.system) && b.system.length > 0));
@@ -402,12 +403,25 @@ export function selectBetaFlags(
   const isHeavyAgent = isFullAgent && isHeavyAgentModel(effectiveModel);
   const isOpusAgent = shouldUseMidConversationSystem(b, effectiveModel);
   const isContext1m = isFullAgent && isContext1mModel(effectiveModel);
+  // Message-level output_config (per-message effort directive, #14746): Anthropic
+  // rejects it with 400 unless its gating beta ships on the same request.
+  const hasMessageOutputConfig = Array.isArray(b.messages)
+    ? (b.messages as unknown[]).some(
+        (m) => !!m && typeof m === "object" && "output_config" in (m as Record<string, unknown>)
+      )
+    : false;
+  // Top-level `speed` (Anthropic Fast Mode): the field is valid only with its beta.
+  const hasSpeed = b.speed !== undefined && b.speed !== null;
 
   const flags: string[] = [];
   if (isFullAgent) flags.push("claude-code-20250219");
   flags.push("oauth-2025-04-20");
   if (isContext1m) flags.push("context-1m-2025-08-07");
   if (isOpusAgent) flags.push("mid-conversation-system-2026-04-07");
+  // Derive these from the body shape so a directive-carrying body is valid even
+  // when the client negotiated no anthropic-beta of its own.
+  if (hasMessageOutputConfig) flags.push("mid-conversation-output-config-2026-07-01");
+  if (hasSpeed) flags.push("fast-mode-2026-02-01");
   // Thinking betas: gated on the client header (#3415). interleaved-thinking forces
   // interleaved-thinking semantics that conflict with a tool_choice-forced turn,
   // producing malformed opus tool_use streams when the client never asked for it.
