@@ -59,6 +59,12 @@ export const FORWARDABLE_CLIENT_BETAS = Object.freeze([
   "effort-2025-11-24",
   "mid-conversation-output-config-2026-07-01",
   "fast-mode-2026-02-01",
+  "server-side-fallback-2026-06-01",
+  "server-side-fallback-2026-07-01",
+  "timing-2026-09-09",
+  "inline-tools-2026-09-15",
+  "thinking-binding-controls-2026-08-01",
+  "thinking-display-updates-2026-08-18",
 ]);
 
 /** Anthropic beta that admits `role: "system"` turns inside `messages[]`. */
