@@ -52,6 +52,7 @@ import {
 } from "../services/tokenRefresh.ts";
 import type { ProviderRequestDefaults } from "../services/providerRequestDefaults.ts";
 import { signRequestBody } from "../services/claudeCodeCCH.ts";
+import { normalizeCacheControlTtl } from "../services/claudeCodeConstraints.ts";
 import {
   appendAnthropicBetaHeader,
   CONTEXT_1M_BETA_HEADER,
@@ -1152,6 +1153,7 @@ export class BaseExecutor {
           }
           sysBlocks.unshift({ type: "text", text: billingLine }, { type: "text", text: SENTINEL });
           tb.system = sysBlocks;
+          normalizeCacheControlTtl(tb);
 
           // Run the configurable system-transforms pipeline for the native
           // `claude` provider (issue #2260 / comment 4459544580). The default
