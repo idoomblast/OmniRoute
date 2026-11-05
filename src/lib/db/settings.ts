@@ -241,6 +241,10 @@ export async function getSettings() {
     // connection on, since pinging burns a small amount of real quota (Hard Rule #20
     // spirit: never mutate/consume on the operator's behalf by default).
     codexAutoPing: { connections: {} },
+    // Operator-set CLI client-version overrides for the Claude Code identity
+    // preset (open-sse/config/cliVersions.ts). Empty record = no override:
+    // resolution falls back to the env var, then the captured pin.
+    cliVersionOverrides: {},
   };
   for (const row of rows) {
     const record = toRecord(row);

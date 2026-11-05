@@ -1,6 +1,11 @@
 import { clearHealthCheckLogCache } from "@/lib/tokenHealthCheck";
 import { setCustomBannedSignals } from "@omniroute/open-sse/services/accountFallback.ts";
 import { isAutomatedTestProcess } from "@/shared/utils/testProcess";
+import {
+  normalizeCliVersionOverrides,
+  setCliVersionOverrides,
+  type CliVersionOverrides,
+} from "@omniroute/open-sse/config/cliVersions";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -18,7 +23,8 @@ export type RuntimeReloadSection =
   | "ccBridgeTransforms"
   | "systemTransforms"
   | "authzBypass"
-  | "bannedSignals";
+  | "bannedSignals"
+  | "cliVersionOverrides";
 
 export interface RuntimeReloadChange {
   section: RuntimeReloadSection;
@@ -46,6 +52,7 @@ interface RuntimeSettingsSnapshot {
   systemTransforms: unknown;
   authzBypass: AuthzBypassSnapshot;
   customBannedSignals: string[];
+  cliVersionOverrides: CliVersionOverrides;
 }
 
 // Default bypass policy: kill-switch on, `/api/mcp/` bypassable. Mirrors the
@@ -72,6 +79,7 @@ const DEFAULT_RUNTIME_SETTINGS_SNAPSHOT: RuntimeSettingsSnapshot = {
   systemTransforms: null,
   authzBypass: DEFAULT_AUTHZ_BYPASS_SNAPSHOT,
   customBannedSignals: [],
+  cliVersionOverrides: {},
 };
 
 let lastAppliedSnapshot: RuntimeSettingsSnapshot | null = null;
@@ -244,6 +252,7 @@ export function buildRuntimeSettingsSnapshot(
     systemTransforms: parseStoredJson(settings.systemTransforms, "systemTransforms"),
     authzBypass: normalizeAuthzBypass(settings),
     customBannedSignals: normalizeStringArray(settings.customBannedSignals),
+    cliVersionOverrides: normalizeCliVersionOverrides(settings.cliVersionOverrides),
   };
 }
 
@@ -532,6 +541,17 @@ export async function applyRuntimeSettings(
   ) {
     setCustomBannedSignals(currentSnapshot.customBannedSignals);
     markChanged("bannedSignals");
+  }
+
+  // CLI client-version overrides: swap the shared leaf store the Claude Code
+  // identity preset reads on every request. Cheap and idempotent, so it is safe
+  // on every settings write (dashboard edit, import-json, config restore).
+  if (
+    settings.cliVersionOverrides !== undefined &&
+    (force || hasChanged(currentSnapshot.cliVersionOverrides, previousSnapshot.cliVersionOverrides))
+  ) {
+    setCliVersionOverrides(currentSnapshot.cliVersionOverrides);
+    markChanged("cliVersionOverrides");
   }
 
   lastAppliedSnapshot = currentSnapshot;

@@ -402,6 +402,18 @@ export async function registerNodejs(): Promise<void> {
       console.log("[STARTUP] Thinking-Budget config restored from settings");
     }
 
+    // Restore the operator's CLI client-version overrides. `settings.cliVersionOverrides`
+    // feeds the Claude Code identity preset through a module-level map on the
+    // per-request hot path, and that preset is also consumed by compatibility bridges
+    // that never see a settings write — so cold-boot hydration is explicit here rather
+    // than relying on applyRuntimeSettings alone (same shape as the two restores above,
+    // and for the same #5312 RC-A reason: an in-memory map with no boot read reverts to
+    // "no override" on every restart).
+    const { hydrateCliVersionOverrides } = await import("@omniroute/open-sse/config/cliVersions");
+    if (hydrateCliVersionOverrides(settings)) {
+      console.log("[STARTUP] CLI client-version overrides restored from settings");
+    }
+
     // Restore the Task-Aware Smart Routing config (#8601). It lives in
     // `settings.taskRouting` (written as a JSON string by PUT /api/settings/task-routing)
     // and is NOT covered by applyRuntimeSettings, so without this the feature silently

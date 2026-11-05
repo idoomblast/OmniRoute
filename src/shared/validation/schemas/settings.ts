@@ -11,6 +11,7 @@ import {
   isForbiddenCustomHeaderName,
 } from "@/shared/constants/upstreamHeaders";
 import { MAX_TIMER_TIMEOUT_MS } from "@/shared/utils/runtimeTimeouts";
+import { CLI_VERSION_KEYS, CLI_VERSION_PATTERN } from "@omniroute/open-sse/config/cliVersions";
 
 // Single source of truth: ../settingsSchemas (the schema the runtime settings route validates
 // against). Re-exported here so this modular barrel stays in exact lockstep — a divergent local
@@ -240,6 +241,39 @@ export const updateThinkingBudgetSchema = z
         message: "No valid fields to update",
         path: [],
       });
+    }
+  });
+
+// Operator-set CLI client-version overrides for the Claude Code identity preset
+// (Dashboard -> Providers -> claude card). `null` is an explicit "clear this
+// override" sentinel; omitting a key leaves its current value alone. Values are
+// validated HERE as well as in the store so the route can reject a bad version
+// loudly: the #12417 env vars fail silently and fall back to the captured pin,
+// which is the very footgun this control exists to remove.
+export const updateCliVersionSchema = z
+  .object({
+    claude: z.string().trim().nullable().optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.claude === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "No valid fields to update",
+        path: [],
+      });
+      return;
+    }
+    for (const key of CLI_VERSION_KEYS) {
+      const raw = value[key];
+      if (raw === undefined || raw === null) continue;
+      if (!CLI_VERSION_PATTERN.test(raw)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Must be a version token like 2.1.259, or null to clear the override",
+          path: [key],
+        });
+      }
     }
   });
 
