@@ -6,6 +6,7 @@ import {
   buildClaudeCodeCompatibleHeaders,
   CLAUDE_CODE_COMPATIBLE_DEFAULT_CHAT_PATH,
   joinClaudeCodeCompatibleUrl,
+  maybeAppendSkillsBeta,
 } from "./claudeCodeCompatible.ts";
 import { getClaudeCodeCompatibleRequestDefaults } from "@/lib/providers/requestDefaults";
 import { buildClineHeaders } from "@/shared/utils/clineAuth";
@@ -360,6 +361,9 @@ export function buildProviderHeaders(provider, credentials, stream = true, body 
         ccHeaders["Authorization"] = `Bearer ${token}`;
       }
     }
+    // CC-compatible headers are built before the body is inspected; sync the
+    // skills beta against the code_execution tool here (#14200).
+    maybeAppendSkillsBeta(ccHeaders, provider, body, true);
     return ccHeaders;
   }
   if (isAnthropicCompatible(provider)) {
@@ -422,6 +426,9 @@ export function buildProviderHeaders(provider, credentials, stream = true, body 
   if (stream) {
     headers["Accept"] = "text/event-stream";
   }
+
+  // #14200: the skills beta is valid only alongside a code_execution tool.
+  maybeAppendSkillsBeta(headers, provider, body);
 
   return headers;
 }

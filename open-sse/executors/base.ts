@@ -7,8 +7,10 @@ import {
 import {
   CLAUDE_CLI_BILLING_VERSION,
   CLAUDE_CLI_STAINLESS_RUNTIME_VERSION,
+  maybeAppendSkillsBeta,
   mergeClientAnthropicBeta,
   normalizeAnthropicHeaderVariants,
+  syncSkillsBeta,
 } from "../config/anthropicHeaders.ts";
 import { applyContextEditingToBody } from "../config/contextEditing.ts";
 import {
@@ -530,6 +532,9 @@ export class BaseExecutor {
     }
 
     headers["Accept"] = stream ? "text/event-stream" : "application/json";
+
+    // #14200: the skills beta is valid only alongside a code_execution tool.
+    maybeAppendSkillsBeta(headers, this.provider, body, this.provider === "claude");
 
     normalizeAnthropicHeaderVariants(headers);
 
@@ -1194,7 +1199,10 @@ export class BaseExecutor {
             // rejected; selectBetaFlags still gates thinking/effort per #3415.
             "anthropic-beta": mergeClientAnthropicBeta(
               selectBetaFlags(tb, null, clientAnthropicBeta),
-              clientAnthropicBeta
+              clientAnthropicBeta,
+              undefined,
+              null,
+              tb
             ),
             "anthropic-dangerous-direct-browser-access": "true",
             "x-app": "cli",
@@ -1365,6 +1373,10 @@ export class BaseExecutor {
             });
           }
         }
+        // Re-synchronize the skills beta with the finalized transformed body (#14200):
+        // tool remapping and stripping above may have removed the code_execution tool.
+        syncSkillsBeta(finalHeaders, this.provider, transformedBody);
+
         const fetchOptions: RequestInit = {
           method: "POST",
           headers: finalHeaders,

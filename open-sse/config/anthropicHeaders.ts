@@ -26,6 +26,9 @@ const ANTHROPIC_BETA_BASE = Object.freeze([
   "advisor-tool-2026-03-01",
   "extended-cache-ttl-2025-04-11",
   "cache-diagnosis-2026-04-07",
+  // Required by the code_execution tool; the skills beta next to it is
+  // injected per-request only (see SKILLS_BETA_HEADER / #14200).
+  "code-execution-2025-08-25",
 ]);
 
 const CLAUDE_OAUTH_EXTRA_BETAS = Object.freeze(["fine-grained-tool-streaming-2025-05-14"]);
@@ -39,6 +42,123 @@ export const ANTHROPIC_BETA_CLAUDE_OAUTH = [
   ...CLAUDE_OAUTH_EXTRA_BETAS,
   ...ANTHROPIC_BETA_BASE.slice(3),
 ].join(",");
+
+/**
+ * Anthropic Skills beta flag. Must only be emitted when a code_execution tool
+ * is declared in the request body; sending it on tool-less requests makes
+ * upstream Anthropic reject with HTTP 400 (#14200).
+ */
+export const SKILLS_BETA_HEADER = "skills-2025-10-02";
+
+/** Append a beta token to an existing anthropic-beta header, deduplicating. */
+export function appendAnthropicBetaHeader(headers: Record<string, string>, betaHeader: string): void {
+  const existingKey = Object.keys(headers).find((key) => key.toLowerCase() === "anthropic-beta");
+  if (!existingKey) {
+    headers["anthropic-beta"] = betaHeader;
+    return;
+  }
+
+  const existingValues = String(headers[existingKey] || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  if (!existingValues.includes(betaHeader)) {
+    headers[existingKey] = [...existingValues, betaHeader].join(",");
+  }
+}
+
+/** Remove a beta token from an existing anthropic-beta header. */
+export function removeAnthropicBetaHeader(headers: Record<string, string>, betaHeader: string): void {
+  if (!headers || typeof headers !== "object") return;
+  const existingKey = Object.keys(headers).find((key) => key.toLowerCase() === "anthropic-beta");
+  if (!existingKey) return;
+
+  const existingValues = String(headers[existingKey] || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value && value !== betaHeader);
+
+  if (existingValues.length > 0) {
+    headers[existingKey] = existingValues.join(",");
+  } else {
+    delete headers[existingKey];
+  }
+}
+
+/** Detect whether a request body declares an Anthropic code_execution tool. */
+export function hasCodeExecutionTool(body: unknown): boolean {
+  if (!body) return false;
+  let parsed: unknown = body;
+  if (typeof body === "string") {
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      return false;
+    }
+  }
+  if (!parsed || typeof parsed !== "object") return false;
+  const tools = (parsed as { tools?: unknown }).tools;
+  if (!Array.isArray(tools) || tools.length === 0) return false;
+  return tools.some((tool) => {
+    if (!tool || typeof tool !== "object") return false;
+    const t = tool as { type?: unknown; name?: unknown; function?: { name?: unknown } };
+    if (
+      typeof t.type === "string" &&
+      (t.type === "code_execution" || t.type.startsWith("code_execution_"))
+    ) {
+      return true;
+    }
+    if (t.name === "code_execution") return true;
+    if (t.type === "function" && t.function && t.function.name === "code_execution") return true;
+    return false;
+  });
+}
+
+function isAnthropicFamilyProvider(provider: string | undefined | null, extraCondition: boolean): boolean {
+  const p = typeof provider === "string" ? provider : "";
+  return (
+    p === "anthropic" ||
+    p === "claude" ||
+    p.startsWith("anthropic-compatible-") ||
+    extraCondition
+  );
+}
+
+/** Append the Skills beta only when the body actually declares code_execution. */
+export function maybeAppendSkillsBeta(
+  headers: Record<string, string>,
+  provider: string | undefined | null,
+  body: unknown,
+  extraCondition = false
+): void {
+  if (!headers || typeof headers !== "object") return;
+  if (!hasCodeExecutionTool(body)) return;
+  if (isAnthropicFamilyProvider(provider, extraCondition)) {
+    appendAnthropicBetaHeader(headers, SKILLS_BETA_HEADER);
+  }
+}
+
+/**
+ * Synchronize the Skills beta with the finalized request body: add it when a
+ * code_execution tool survived transformation, strip it when tools were
+ * stripped or rewritten away (#14200).
+ */
+export function syncSkillsBeta(
+  headers: Record<string, string>,
+  provider: string | undefined | null,
+  body: unknown,
+  extraCondition = false
+): void {
+  if (!headers || typeof headers !== "object") return;
+  if (!isAnthropicFamilyProvider(provider, extraCondition)) return;
+
+  if (hasCodeExecutionTool(body)) {
+    appendAnthropicBetaHeader(headers, SKILLS_BETA_HEADER);
+  } else {
+    removeAnthropicBetaHeader(headers, SKILLS_BETA_HEADER);
+  }
+}
 
 /**
  * Client-negotiated `anthropic-beta` values that are safe to forward to the
@@ -65,6 +185,7 @@ export const FORWARDABLE_CLIENT_BETAS = Object.freeze([
   "inline-tools-2026-09-15",
   "thinking-binding-controls-2026-08-01",
   "thinking-display-updates-2026-08-18",
+  "skills-2025-10-02",
 ]);
 
 /** Anthropic beta that admits `role: "system"` turns inside `messages[]`. */
@@ -90,7 +211,9 @@ export function hasMidConversationSystemTurn(body: unknown): boolean {
 export function mergeClientAnthropicBeta(
   base: string,
   clientBeta: string | null | undefined,
-  allow: readonly string[] = FORWARDABLE_CLIENT_BETAS
+  allow: readonly string[] = FORWARDABLE_CLIENT_BETAS,
+  _model?: string | null,
+  body?: unknown
 ): string {
   const baseList = base
     .split(",")
@@ -104,6 +227,16 @@ export function mergeClientAnthropicBeta(
     .map((s) => s.trim())
     .filter(Boolean)) {
     const lower = token.toLowerCase();
+    // Skills beta is passthrough-inert unless the body still declares a
+    // code_execution tool; forwarding it on tool-less requests 400s upstream (#14200).
+    if (
+      lower === SKILLS_BETA_HEADER &&
+      body !== undefined &&
+      body !== null &&
+      !hasCodeExecutionTool(body)
+    ) {
+      continue;
+    }
     if (allowSet.has(lower) && !seen.has(lower)) {
       baseList.push(token);
       seen.add(lower);

@@ -151,25 +151,14 @@ export function joinClaudeCodeCompatibleUrl(baseUrl: string, path: string): stri
   return joinNormalizedBaseUrlAndPath(stripClaudeCodeCompatibleEndpointSuffix(baseUrl), path);
 }
 
-export function appendAnthropicBetaHeader(
-  headers: Record<string, string>,
-  betaHeader: string
-): void {
-  const existingKey = Object.keys(headers).find((key) => key.toLowerCase() === "anthropic-beta");
-  if (!existingKey) {
-    headers["anthropic-beta"] = betaHeader;
-    return;
-  }
-
-  const existingValues = String(headers[existingKey] || "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
-
-  if (!existingValues.includes(betaHeader)) {
-    headers[existingKey] = [...existingValues, betaHeader].join(",");
-  }
-}
+export {
+  appendAnthropicBetaHeader,
+  removeAnthropicBetaHeader,
+  hasCodeExecutionTool,
+  maybeAppendSkillsBeta,
+  syncSkillsBeta,
+  SKILLS_BETA_HEADER,
+} from "../config/anthropicHeaders.ts";
 
 export function modelSupportsContext1mBeta(model: string | null | undefined): boolean {
   const normalizedModel = String(model || "")

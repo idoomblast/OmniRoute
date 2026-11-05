@@ -15,6 +15,7 @@ import {
   FORWARDABLE_CLIENT_BETAS,
   MID_CONVERSATION_SYSTEM_BETA,
   hasMidConversationSystemTurn,
+  maybeAppendSkillsBeta,
   mergeClientAnthropicBeta,
   normalizeAnthropicHeaderVariants,
 } from "../config/anthropicHeaders.ts";
@@ -525,9 +526,18 @@ export class DefaultExecutor extends BaseExecutor {
         const allow = midConversationAllowed
           ? [...FORWARDABLE_CLIENT_BETAS, MID_CONVERSATION_SYSTEM_BETA]
           : undefined;
-        headers[betaKey] = mergeClientAnthropicBeta(headers[betaKey] ?? "", clientBeta, allow);
+        headers[betaKey] = mergeClientAnthropicBeta(
+          headers[betaKey] ?? "",
+          clientBeta,
+          allow,
+          null,
+          body
+        );
       }
     }
+
+    // #14200: emit the skills beta only when the body carries a code_execution tool.
+    maybeAppendSkillsBeta(headers, this.provider, body, this.provider === "claude");
 
     normalizeAnthropicHeaderVariants(headers);
 
