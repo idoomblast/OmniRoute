@@ -25,3 +25,11 @@ test("mid-conversation system stays off without tools or for legacy models", () 
     false
   );
 });
+
+test("Fable keeps mid-conversation-system without the context-1m beta", () => {
+  for (const model of ["claude-fable-5", "claude-fable-5-1"]) {
+    const flags = selectBetaFlags(body, model);
+    assert.equal(flags.includes("mid-conversation-system-2026-04-07"), true);
+    assert.equal(flags.includes("context-1m-2025-08-07"), false);
+  }
+});
