@@ -175,7 +175,10 @@ export function modelSupportsContext1mBeta(model: string | null | undefined): bo
     .replace(/-\d{8}$/, "");
 
   return CONTEXT_1M_SUPPORTED_MODELS.some(
-    (supported) => normalizedModel === supported || normalizedModel.startsWith(`${supported}-`)
+    (supported) =>
+      normalizedModel === supported ||
+      (normalizedModel.startsWith(`${supported}-`) &&
+        !/^\d/.test(normalizedModel.slice(supported.length + 1)))
   );
 }
 

@@ -71,6 +71,14 @@ export const GPT_5_6_LUNA_PRICING = {
   cache_creation: 1.25,
 };
 
+export const CLAUDE_FABLE_5_1_PRICING = {
+  input: 10.0,
+  output: 50.0,
+  cached: 0.25,
+  reasoning: 50.0,
+  cache_creation: 12.5,
+};
+
 export const CLAUDE_FABLE_5_PRICING = {
   input: 15.0,
   output: 75.0,
