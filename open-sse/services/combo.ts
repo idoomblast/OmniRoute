@@ -581,6 +581,7 @@ export async function handleComboChat({
   signal,
   apiKeyAllowedConnections = null,
   nesting = null,
+  sourceFormat = null,
 }: HandleComboChatOptions): Promise<Response> {
   const comboCtx = createComboContext({ body, combo, settings, relayOptions, log });
   const {
@@ -1155,7 +1156,8 @@ export async function handleComboChat({
                 lastModel,
                 modelStr,
                 `Model routing: ${lastModel} → ${modelStr}`,
-                existingHandoff
+                existingHandoff,
+                sourceFormat
               );
             }
           }

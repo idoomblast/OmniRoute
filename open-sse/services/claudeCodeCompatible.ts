@@ -1,5 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
+export { finalizeClaudeBodyConstraints } from "./claudeCodeConstraints.ts";
+
 import { getStainlessTimeoutSeconds } from "@/shared/utils/runtimeTimeouts";
 import { ANTHROPIC_VERSION_HEADER } from "../config/anthropicHeaders.ts";
 import {
