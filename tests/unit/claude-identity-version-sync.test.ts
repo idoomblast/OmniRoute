@@ -12,7 +12,7 @@ const glmProvider = await import("../../open-sse/config/glmProvider.ts");
 
 const CANONICAL = claudeIdentity.CLAUDE_CODE_VERSION;
 
-// "claude-cli/2.1.258 (external, sdk-cli)" → "2.1.258". String ops only — never a RegExp over
+// "claude-cli/2.1.280 (external, sdk-cli)" → "2.1.280". String ops only — never a RegExp over
 // the value, per the project's anti-ReDoS contract.
 function versionFromUserAgent(userAgent: string): string {
   const afterSlash = userAgent.split("claude-cli/")[1] ?? "";
