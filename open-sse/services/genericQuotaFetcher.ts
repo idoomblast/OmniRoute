@@ -116,7 +116,10 @@ interface ConnectionInputs {
  * / shape-unknown / missing). Exported for unit testing — the production path
  * is `fetchGenericQuota`, which adds caching + the upstream call.
  */
-export function convertUsageToQuotaInfo(usage: unknown): QuotaInfo | null {
+export function convertUsageToQuotaInfo(
+  usage: unknown,
+  _context?: { provider?: string | null }
+): QuotaInfo | null {
   if (!usage || typeof usage !== "object") return null;
   const usageRecord = usage as Record<string, unknown>;
   if (
@@ -150,6 +153,14 @@ export function convertUsageToQuotaInfo(usage: unknown): QuotaInfo | null {
 
   if (Object.keys(windows).length === 0) return null;
 
+  const bootstrap = usageRecord.bootstrap as Record<string, unknown> | null | undefined;
+  // A Team seat's own tier beats the org's base tier and the CLI file's stale copy.
+  const plan =
+    [bootstrap?.user_rate_limit_tier, bootstrap?.organization_rate_limit_tier, usageRecord.plan]
+      .filter((value): value is string => typeof value === "string")
+      .map((value) => value.trim())
+      .find((value) => value.length > 0) ?? null;
+
   return {
     used: 0,
     total: 0,
@@ -157,6 +168,7 @@ export function convertUsageToQuotaInfo(usage: unknown): QuotaInfo | null {
     resetAt: worstResetAt,
     windows,
     limitReached: worstPercent >= 1 - 1e-9,
+    plan,
   };
 }
 

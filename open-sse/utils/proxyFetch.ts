@@ -702,6 +702,15 @@ if (!isCloud && !patchState.isPatched) {
 }
 
 /**
+ * True when the caller already runs inside an explicit proxy context — i.e. an
+ * outer runWithProxyContext(proxyConfig, ...) pinned a proxy for this async
+ * scope. False for an empty store and for the direct sentinel (`null`).
+ */
+export function hasAmbientProxyContext(): boolean {
+  return Boolean(proxyContext.getStore());
+}
+
+/**
  * Run a function with TLS fingerprint tracking context.
  * After fn completes, returns { result, tlsFingerprintUsed }.
  */

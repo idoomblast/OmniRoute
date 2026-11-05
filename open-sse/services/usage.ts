@@ -159,7 +159,9 @@ export async function getUsageForProvider(
         options
       );
     case "claude":
-      return await getClaudeUsage(accessToken);
+      return await getClaudeUsage(accessToken, id || "", {
+        forceRefresh: options.forceRefresh === true,
+      });
     case "codex":
       return await getCodexUsage(accessToken, providerSpecificData);
     case "cursor":

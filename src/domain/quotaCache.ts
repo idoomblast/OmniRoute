@@ -37,6 +37,12 @@ interface QuotaCacheEntry {
   connectionId: string;
   provider: string;
   quotas: Record<string, QuotaInfo>;
+  /**
+   * Per-model windows reported beside the account-wide ones (Claude's
+   * `weekly_scoped` limits). Display-only: never folded into `quotas`, so a
+   * saturated Fable week cannot block routing for every Claude model.
+   */
+  modelQuotas: Record<string, QuotaInfo>;
   fetchedAt: number;
   exhausted: boolean;
   nextResetAt: string | null;
@@ -311,9 +317,11 @@ export function isQuotaExhaustedForRequest(
 export function setQuotaCache(
   connectionId: string,
   provider: string,
-  rawQuotas: Record<string, any>
+  rawQuotas: Record<string, any>,
+  rawModelQuotas: Record<string, any> = {}
 ) {
   const quotas = normalizeQuotas(rawQuotas);
+  const modelQuotas = normalizeQuotas(rawModelQuotas);
   const exhausted = isExhausted(quotas);
   // #4438 — capture the prior entry BEFORE overwriting the cache so we can skip
   // redundant snapshot writes for idle connections whose quota didn't change.
@@ -322,6 +330,7 @@ export function setQuotaCache(
     connectionId,
     provider,
     quotas,
+    modelQuotas,
     fetchedAt: Date.now(),
     exhausted,
     nextResetAt: exhausted ? earliestResetAt(quotas) : null,
@@ -433,6 +442,7 @@ function hydrateQuotaCacheFromSnapshots(connectionId: string): QuotaCacheEntry |
     connectionId,
     provider,
     quotas,
+    modelQuotas: {},
     fetchedAt: fetchedAt || Date.now(),
     exhausted,
     nextResetAt: exhausted ? earliestResetAt(quotas) : null,
@@ -518,6 +528,7 @@ export function markAccountExhaustedFrom429(connectionId: string, provider: stri
     connectionId,
     provider,
     quotas: {},
+    modelQuotas: {},
     fetchedAt: Date.now(),
     exhausted: true,
     nextResetAt: null,

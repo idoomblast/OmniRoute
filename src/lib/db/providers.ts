@@ -11,6 +11,7 @@ import {
   migrateLegacyEncryptedString,
 } from "./encryption";
 import { createLazyRowProxy } from "./providers/lazyConnectionView";
+import { isOtherClaudeOrg } from "./claudeConnectionIdentity";
 import { invalidateDbCache, getCachedRawProviderConnections } from "./readCache";
 import {
   removeConnectionHealth,
@@ -338,14 +339,10 @@ export async function createProviderConnection(data: JsonRecord) {
             .get(data.provider, workspaceId, data.email) as JsonRecord | undefined) || null;
       }
     } else {
-      // For other providers (or Codex without workspaceId), match on email —
-      // disambiguated by providerSpecificData.username when present on both
-      // sides. Two different IdPs can share the same email address (e.g. a
-      // Google account and a HuggingFace account); matching on email alone
-      // would silently overwrite the other account's connection on the
-      // second login. Only fall back to the bare email-only match when
-      // neither side carries a username (legacy rows created before this
-      // disambiguation existed).
+      // Match on email, disambiguated by username when both rows carry one, and
+      // by Claude organization when both sides do (#18763). Distinct IdPs and
+      // distinct Claude orgs may share an email; email alone would overwrite
+      // the other connection. Bare email only matches legacy rows without both.
       const incomingUsername = toStringOrNull(providerSpecificData.username);
       const emailMatches = db
         .prepare(
@@ -354,9 +351,12 @@ export async function createProviderConnection(data: JsonRecord) {
         .all(data.provider, data.email) as JsonRecord[];
       existing =
         emailMatches.find((row) => {
-          const existingUsername = toStringOrNull(
-            parseProviderSpecificData(row.provider_specific_data)?.username
-          );
+          const existingPsd = parseProviderSpecificData(row.provider_specific_data);
+          const orgDiffers =
+            data.provider === "claude" &&
+            isOtherClaudeOrg(providerSpecificData, existingPsd);
+          if (orgDiffers) return false;
+          const existingUsername = toStringOrNull(existingPsd?.username);
           if (incomingUsername && existingUsername) {
             return incomingUsername === existingUsername;
           }

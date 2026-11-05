@@ -10,6 +10,15 @@
 
 import { toNumber, clampPercentage } from "./scalars.ts";
 
+export type ClaudeQuotaMetadata = {
+  kind: "session" | "weekly_all" | "weekly_scoped";
+  active: boolean;
+  severity: string | null;
+  scopeKey: string | null;
+  modelId: string | null;
+  modelDisplayName: string | null;
+};
+
 export type UsageQuota = {
   used: number;
   total: number;
@@ -32,6 +41,7 @@ export type UsageQuota = {
   currency?: string;
   grantedBalance?: number;
   toppedUpBalance?: number;
+  claudeQuota?: ClaudeQuotaMetadata;
 };
 
 export function parseResetTime(resetValue: unknown): string | null {

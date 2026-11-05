@@ -59,6 +59,8 @@ export interface QuotaInfo {
   windows?: Record<string, QuotaWindowInfo>;
   /** True when the upstream usage endpoint explicitly reports exhausted quota. */
   limitReached?: boolean;
+  /** Best-known plan/tier label for this connection, when the usage payload carries one. */
+  plan?: string | null;
 }
 
 export type QuotaFetcher = (

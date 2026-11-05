@@ -98,22 +98,11 @@ const PROVIDER_LIMITS_AUTO_SYNC_SETTING_KEY = "provider_limits_auto_sync_last_ru
 const DEFAULT_PROVIDER_LIMITS_POST_USAGE_REFRESH_DELAY_MS = 5_000;
 const pendingPostUsageRefreshes = new Set<string>();
 
-function toProviderLimitsCacheEntry(
-  usage: JsonRecord,
-  source: SyncSource,
-  fetchedAt = new Date().toISOString()
-): ProviderLimitsCacheEntry {
-  const value = Number(usage.bankedResetCredits);
-  return {
-    quotas: isRecord(usage.quotas) ? usage.quotas : null,
-    ...(isRecord(usage.modelQuotas) ? { modelQuotas: usage.modelQuotas } : {}),
-    plan: usage.plan ?? null,
-    message: typeof usage.message === "string" ? usage.message : null,
-    fetchedAt,
-    source,
-    bankedResetCredits: Number.isFinite(value) ? value : undefined,
-  };
-}
+import {
+  mergeProviderLimitsCacheEntry,
+  setQuotaCacheFromUsage,
+  toProviderLimitsCacheEntry,
+} from "./providerLimitsCacheEntry.ts";
 
 function getProviderLimitsPostUsageRefreshDelayMs(): number {
   const raw = Number(process.env.PROVIDER_LIMITS_POST_USAGE_REFRESH_DELAY_MS ?? "");
@@ -603,6 +592,10 @@ async function syncClaudeBootstrapIfNeeded(
     ["organization_name", "organizationName"],
     ["organization_type", "organizationType"],
     ["organization_rate_limit_tier", "organizationRateLimitTier"],
+    // The account's own tier: `rateLimitTier` is otherwise frozen at import (copied from the
+    // CLI credentials file) and goes stale when a Team admin moves seats.
+    ["user_rate_limit_tier", "rateLimitTier"],
+    ["seat_tier", "seatTier"],
   ];
 
   const nextPsd: JsonRecord = { ...psd };
@@ -751,9 +744,7 @@ async function fetchLiveProviderLimitsWithOptions(
         getUsageForProvider(connection as unknown as JsonRecord, options)
       )) as JsonRecord
     );
-    if (isRecord(usage.quotas)) {
-      setQuotaCache(connectionId, connection.provider, usage.quotas);
-    }
+    setQuotaCacheFromUsage(connectionId, connection.provider, usage);
     connection = await syncExpiredStatusIfNeeded(connection, usage);
     connection = await syncClaudeExtraUsageStateIfNeeded(connection, usage);
     connection = await syncClaudeBootstrapIfNeeded(connection, usage);
@@ -866,9 +857,7 @@ async function fetchLiveProviderLimitsWithOptions(
     result = await fetchUsageWithContext(null);
   }
 
-  if (isRecord(result.usage.quotas)) {
-    setQuotaCache(connectionId, connection.provider, result.usage.quotas);
-  }
+  setQuotaCacheFromUsage(connectionId, connection.provider, result.usage);
   connection = await syncExpiredStatusIfNeeded(connection, result.usage);
   connection = await syncClaudeExtraUsageStateIfNeeded(connection, result.usage);
   connection = await syncClaudeBootstrapIfNeeded(connection, result.usage);
