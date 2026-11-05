@@ -13,6 +13,7 @@ import {
   syncSkillsBeta,
 } from "../config/anthropicHeaders.ts";
 import { applyContextEditingToBody } from "../config/contextEditing.ts";
+import { stripRedactThinkingBetaForVisibleThinking } from "./base/redactThinkingBeta.ts";
 import {
   findOffendingField,
   detectUnsupportedParam,
@@ -1316,6 +1317,15 @@ export class BaseExecutor {
             "Delegated context editing on — attached clear_tool_uses to the Claude request"
           );
         }
+
+        // Explicit thinking.display="summarized" must not be blanked by redact-thinking.
+        // Claude OAuth keeps its fingerprint beta unless the default-off
+        // CLAUDE_OAUTH_SUMMARIZED_THINKING_UNREDACTED flag is on.
+        stripRedactThinkingBetaForVisibleThinking(headers, transformedBody, clientHeaders, {
+          connectionOptedIn:
+            (ccRequestDefaults as { redactThinking?: boolean }).redactThinking === true,
+          claudeOAuth: this.provider === "claude" && hasClaudeOAuthToken,
+        });
 
         let bodyString = JSON.stringify(transformedBody);
 
