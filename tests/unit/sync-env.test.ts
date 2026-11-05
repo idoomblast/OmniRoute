@@ -25,7 +25,7 @@ function writeEnvExample(rootDir: string) {
       "MACHINE_ID_SALT=",
       "CLAUDE_OAUTH_CLIENT_ID=claude-default",
       "CODEX_OAUTH_CLIENT_ID=codex-default",
-      'CLAUDE_USER_AGENT="claude-cli/2.1.219 (external, cli)"',
+      'CLAUDE_USER_AGENT="claude-cli/2.1.258 (external, cli)"',
       "# COMMENTED_KEY=skip-me",
       "",
     ].join("\n"),
@@ -130,7 +130,7 @@ test("syncEnv treats quoted and unquoted values as equivalent", () => {
         "MACHINE_ID_SALT=machine-salt",
         "CLAUDE_OAUTH_CLIENT_ID=claude-default",
         "CODEX_OAUTH_CLIENT_ID=codex-default",
-        'CLAUDE_USER_AGENT="claude-cli/2.1.219 (external, cli)"',
+        'CLAUDE_USER_AGENT="claude-cli/2.1.258 (external, cli)"',
         "",
       ].join("\n"),
       "utf8"
