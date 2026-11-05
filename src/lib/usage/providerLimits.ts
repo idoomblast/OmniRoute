@@ -106,6 +106,7 @@ function toProviderLimitsCacheEntry(
   const value = Number(usage.bankedResetCredits);
   return {
     quotas: isRecord(usage.quotas) ? usage.quotas : null,
+    ...(isRecord(usage.modelQuotas) ? { modelQuotas: usage.modelQuotas } : {}),
     plan: usage.plan ?? null,
     message: typeof usage.message === "string" ? usage.message : null,
     fetchedAt,
@@ -904,6 +905,7 @@ export async function fetchAndPersistProviderLimits(
       const staleUsage: JsonRecord = {
         ...usage,
         quotas: previous.quotas,
+        modelQuotas: previous.modelQuotas,
         plan: previous.plan ?? usage.plan ?? null,
         bankedResetCredits: previous.bankedResetCredits,
         message: null,
