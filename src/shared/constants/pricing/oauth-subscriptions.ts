@@ -7,6 +7,7 @@ import {
   GPT_6_LUNA_PRICING,
   GPT_6_SOL_PRICING,
   CLAUDE_FABLE_5_1_PRICING,
+  CLAUDE_HAIKU_5_PRICING,
   CLAUDE_OPUS_5_5_PRICING,
   CLAUDE_OPUS_5_PRICING,
   GPT_5_3_CODEX_PRICING,
@@ -95,6 +96,7 @@ export const DEFAULT_PRICING_OAUTH = {
       reasoning: 5.0,
       cache_creation: 1.25,
     },
+    "claude-haiku-5-5": CLAUDE_HAIKU_5_PRICING,
   },
   cx: {
     "gpt-6.1-sol": GPT_6_1_SOL_CODEX_PRICING,

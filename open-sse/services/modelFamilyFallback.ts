@@ -100,6 +100,9 @@ const MODEL_FAMILIES: Record<string, string[]> = {
   "claude-sonnet-4-6": ["claude-sonnet-4-5-20250929", "claude-sonnet-4-20250514"],
   "claude-sonnet-4-5-20250929": ["claude-sonnet-4-6", "claude-sonnet-4-20250514"],
 
+  // Claude Haiku family
+  "claude-haiku-5-5": ["claude-haiku-4-5-20251001", "claude-haiku-4.5", "claude-haiku-4-5"],
+
   // GPT-5 family
   "gpt-5": ["gpt-5-mini", "gpt-4o"],
   "gpt-5.1": ["gpt-5.1-mini", "gpt-5", "gpt-4o"],

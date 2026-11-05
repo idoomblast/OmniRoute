@@ -181,6 +181,11 @@ export function supportsClaudeMaxEffort(modelId: string | null | undefined): boo
   const normalized = modelId.toLowerCase();
   const claudeMatch = normalized.match(CLAUDE_MODEL_PATTERN);
   if (!claudeMatch) return false;
+  // An explicit spec list is authoritative (e.g. Haiku 5.5 supports max even
+  // though older Haiku tiers do not).
+  const specId = normalized.replace(/^.*?(?=claude-)/, "");
+  const specEfforts = getModelSpec(specId)?.supportedThinkingEfforts;
+  if (specEfforts) return specEfforts.includes("max");
   const claudeScopedId = normalized.slice(claudeMatch.index ?? 0);
   return !CLAUDE_MAX_EFFORT_UNSUPPORTED_FAMILY_PATTERNS.some((pattern) =>
     pattern.test(claudeScopedId)
