@@ -555,7 +555,10 @@ async function refreshEntry(entry: QuotaCacheEntry) {
     );
 
     if (usage?.quotas) {
-      setQuotaCache(entry.connectionId, entry.provider, usage.quotas);
+      // Background refresh must carry the display-only per-model windows too,
+      // otherwise a refresh tick blanks the scoped rows until the next read.
+      const modelQuotas = (usage as { modelQuotas?: Record<string, unknown> }).modelQuotas;
+      setQuotaCache(entry.connectionId, entry.provider, usage.quotas, modelQuotas ?? {});
     }
   } catch (err) {
     console.warn(
