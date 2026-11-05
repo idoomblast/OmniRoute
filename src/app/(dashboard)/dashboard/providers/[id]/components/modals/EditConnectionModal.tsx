@@ -142,6 +142,8 @@ export default function EditConnectionModal({
         : false,
     passthroughModels: connectionProviderSpecificData?.passthroughModels === true,
     disableCooling: connectionProviderSpecificData?.disableCooling === true,
+    keepMidConversationSystem:
+      connectionProviderSpecificData?.keepMidConversationSystem === true,
     importFreeModelsOnly: connectionProviderSpecificData?.importFreeModelsOnly === true,
     m365Tier: normalizeM365TierValue(connectionProviderSpecificData?.tier) as M365TierValue,
   });
@@ -208,6 +210,8 @@ export default function EditConnectionModal({
   const apiKeyOptional =
     providerAllowsOptionalApiKey(provider) || Boolean(isNoAuthWebSessionCredential);
   const isCcCompatible = isClaudeCodeCompatibleProvider(provider);
+  const isPlainAnthropicCompatible =
+    isAnthropicCompatibleProvider(provider) && !isCcCompatible;
   const isCompatible =
     isOpenAICompatibleProvider(provider) || isAnthropicCompatibleProvider(provider);
   const apiCredentialLabel = webSessionCredential
@@ -333,6 +337,8 @@ export default function EditConnectionModal({
         ),
         passthroughModels: connection?.providerSpecificData?.passthroughModels === true,
         disableCooling: connection?.providerSpecificData?.disableCooling === true,
+        keepMidConversationSystem:
+          connection?.providerSpecificData?.keepMidConversationSystem === true,
         importFreeModelsOnly: connection?.providerSpecificData?.importFreeModelsOnly === true,
         m365Tier: normalizeM365TierValue(connection.providerSpecificData?.tier) as M365TierValue,
       });
@@ -571,6 +577,10 @@ export default function EditConnectionModal({
         if (isClaude) {
           updates.providerSpecificData.blockExtraUsage = formData.blockExtraUsage;
         }
+        if (isPlainAnthropicCompatible) {
+          updates.providerSpecificData.keepMidConversationSystem =
+            formData.keepMidConversationSystem ? true : undefined;
+        }
         if (isCodex) {
           updates.providerSpecificData.requestDefaults = {
             reasoningEffort: formData.codexReasoningEffort,
@@ -734,6 +744,24 @@ export default function EditConnectionModal({
             label={t("disableCoolingLabel")}
             description={t("disableCoolingDescription")}
           />
+          {isPlainAnthropicCompatible && (
+            <Toggle
+              checked={formData.keepMidConversationSystem}
+              onChange={(checked) =>
+                setFormData({ ...formData, keepMidConversationSystem: checked })
+              }
+              label={providerText(
+                t,
+                "keepMidConversationSystemLabel",
+                "Keep mid-conversation system messages in place"
+              )}
+              description={providerText(
+                t,
+                "keepMidConversationSystemDescription",
+                'Leave system messages sent mid-conversation inside the message list instead of moving them into the top-level system prompt, so the prompt cache keeps hitting across turns. Enable only if this upstream accepts role "system" inside messages (otherwise it answers 400).'
+              )}
+            />
+          )}
         </div>
         <QuotaScrapingFields
           provider={provider}

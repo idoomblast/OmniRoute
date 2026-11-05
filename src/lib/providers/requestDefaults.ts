@@ -257,6 +257,14 @@ export function normalizeProviderSpecificData(
     delete normalized.excluded_models;
   }
 
+  // Mid-conversation system turns in place (open-sse/services/claudeMidConversationSystem.ts).
+  if (
+    "keepMidConversationSystem" in normalized &&
+    typeof normalized.keepMidConversationSystem !== "boolean"
+  ) {
+    delete normalized.keepMidConversationSystem;
+  }
+
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 

@@ -938,7 +938,6 @@
   "featureFlagOmnirouteEmergencyFallbackDescription": "Route budget-exhausted requests to the emergency free fallback provider/model.",
   "featureFlagArenaEloSyncEnabledDescription": "Enable periodic Arena AI leaderboard ELO sync for model intelligence rankings.",
   "featureFlagExposeCcDiscoveryAliasesDescription": "Advertise claude/&lt;provider&gt;/&lt;model&gt; mirror ids on /v1/models so Claude Code gateway model discovery lists non-Claude models. Warning: doubles catalog entries for all clients when enabled globally.",
-  "featureFlagAnthropicCompatibleMidConversationSystemDescription": "Keep mid-conversation system turns inside messages[] on plain anthropic-compatible relays when the client negotiated the mid-conversation-system beta, so the cached prompt prefix stays stable. Off by default.",
   "sidebar": {
     "home": "Home",
     "dashboard": "Dashboard",
@@ -5465,6 +5464,8 @@
     "blockClaudeExtraUsageLabel": "Block extra Claude usage",
     "disableCoolingDescription": "Skip the transient cooldown so this connection stays eligible even after recoverable errors (terminal states like banned/expired still apply).",
     "disableCoolingLabel": "Disable cooldown for this connection",
+    "keepMidConversationSystemLabel": "Keep mid-conversation system messages in place",
+    "keepMidConversationSystemDescription": "Leave system messages sent mid-conversation inside the message list instead of moving them into the top-level system prompt, so the prompt cache keeps hitting across turns. Enable only if this upstream accepts role \"system\" inside messages (otherwise it answers 400).",
     "bulkPasteAdded": "{count, plural, one {1 key added} other {# keys added}}",
     "bulkPasteDuplicatesIgnored": "{count, plural, one {1 duplicate skipped} other {# duplicates skipped}}",
     "bulkPasteHint": "Paste one API key per line. Empty lines are ignored and duplicate keys are skipped.",

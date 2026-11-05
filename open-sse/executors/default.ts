@@ -18,7 +18,7 @@ import {
   mergeClientAnthropicBeta,
   normalizeAnthropicHeaderVariants,
 } from "../config/anthropicHeaders.ts";
-import { isFeatureFlagEnabled } from "../../src/shared/utils/featureFlags.ts";
+import { keepsMidConversationSystem } from "../services/claudeMidConversationSystem.ts";
 import { isOfficialAnthropicBaseUrl } from "../utils/anthropicHost.ts";
 import { applyProviderRequestDefaults } from "../services/providerRequestDefaults.ts";
 import { stripUnsupportedParams } from "../translator/paramSupport.ts";
@@ -521,7 +521,7 @@ export class DefaultExecutor extends BaseExecutor {
         const midConversationAllowed =
           isCompatRelay &&
           hasMidConversationSystemTurn(body) &&
-          isFeatureFlagEnabled("ANTHROPIC_COMPATIBLE_MID_CONVERSATION_SYSTEM");
+          keepsMidConversationSystem(credentials?.providerSpecificData);
         const allow = midConversationAllowed
           ? [...FORWARDABLE_CLIENT_BETAS, MID_CONVERSATION_SYSTEM_BETA]
           : undefined;

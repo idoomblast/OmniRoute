@@ -28,7 +28,6 @@ import {
 } from "./chatCore/headers.ts";
 import { markCodexScopeRateLimited } from "./chatCore/codexFailover.ts";
 import { isCodexOriginatedHeaders } from "../config/codexIdentity.ts";
-import { isFeatureFlagEnabled } from "../../src/shared/utils/featureFlags.ts";
 import { trackDevice, extractIpFromHeaders } from "../services/deviceTracker.ts";
 import { getCombosCached } from "./chatCore/comboContextCache.ts";
 export { clearCombosCache, clearUpstreamProxyConfigCache } from "./chatCore/comboContextCache.ts";
@@ -1992,13 +1991,8 @@ export async function handleChatCore({
         ...options,
         provider,
         sourceFormat,
-        // #16236: in-place mid-conversation system turns are opt-in AND need the client's beta.
-        clientAnthropicBeta: getHeaderValueCaseInsensitive(
-          clientRawRequest?.headers ?? null,
-          "anthropic-beta"
-        ),
-        isMidConversationSystemEnabled: () =>
-          isFeatureFlagEnabled("ANTHROPIC_COMPATIBLE_MID_CONVERSATION_SYSTEM"),
+        // #16236: in-place mid-conversation system turns are a per-connection opt-in.
+        providerSpecificData: credentials?.providerSpecificData,
       },
       log
     );

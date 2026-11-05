@@ -219,10 +219,8 @@ export function hoistLeadingTextSystemMessages(payload: Record<string, unknown>)
 export type SystemRoleRoute = {
   provider?: string | null;
   sourceFormat?: string | null;
-  /** The client's own `anthropic-beta` header (the beta must be negotiated by the client). */
-  clientAnthropicBeta?: string | null;
-  /** Injected ANTHROPIC_COMPATIBLE_MID_CONVERSATION_SYSTEM reader; absent/throwing = off. */
-  isMidConversationSystemEnabled?: (() => boolean) | null;
+  /** The connection's providerSpecificData (carries the keepMidConversationSystem opt-in). */
+  providerSpecificData?: unknown;
 };
 
 /**
@@ -241,8 +239,7 @@ export function liftSystemRoleMessages(
     provider: route?.provider,
     sourceFormat: route?.sourceFormat,
     targetFormat: FORMATS.CLAUDE,
-    clientAnthropicBeta: route?.clientAnthropicBeta,
-    isPassthroughEnabled: route?.isMidConversationSystemEnabled,
+    providerSpecificData: route?.providerSpecificData,
   });
   const messages = Array.isArray(payload.messages)
     ? (payload.messages as Array<{ role?: unknown }>)
