@@ -12,7 +12,8 @@
  */
 
 import type { ClaudeContentBlock, ClaudeMessage } from "./claudeMessageTypes.ts";
-import { extractSystemRoleMessages, relocateHoistedCacheBoundary } from "./claudeSystemRole.ts";
+import { liftSystemRoleMessages, relocateHoistedCacheBoundary } from "./claudeSystemRole.ts";
+import type { SystemRoleRoute } from "./claudeSystemRole.ts";
 import { splitMisplacedToolResults } from "../../translator/helpers/claudeHelper.ts";
 
 type LoggerLike = { debug?: (...args: unknown[]) => void } | null | undefined;
@@ -83,16 +84,15 @@ export function extractSystemMessagesToBody(payload: Record<string, unknown>) {
 
 export function normalizeClaudeUpstreamMessages(
   payload: Record<string, unknown>,
-  options?: { preserveToolResultBlocks?: boolean },
+  options?: { preserveToolResultBlocks?: boolean } & SystemRoleRoute,
   log?: LoggerLike
 ) {
   const preserveToolResultBlocks = options?.preserveToolResultBlocks === true;
   if (!Array.isArray(payload.messages)) return;
-  let messages = payload.messages as ClaudeMessage[];
 
-  // Extract system/developer role messages into top-level system parameter.
-  extractSystemRoleMessages(payload);
-  messages = payload.messages as ClaudeMessage[];
+  // Lift system/developer role messages into the top-level system parameter.
+  liftSystemRoleMessages(payload, options);
+  const messages = payload.messages as ClaudeMessage[];
 
   // Anthropic rejects empty text blocks in native Messages payloads.
   for (const msg of messages) {

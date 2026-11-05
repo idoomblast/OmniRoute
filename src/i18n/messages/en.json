@@ -938,6 +938,7 @@
   "featureFlagOmnirouteEmergencyFallbackDescription": "Route budget-exhausted requests to the emergency free fallback provider/model.",
   "featureFlagArenaEloSyncEnabledDescription": "Enable periodic Arena AI leaderboard ELO sync for model intelligence rankings.",
   "featureFlagExposeCcDiscoveryAliasesDescription": "Advertise claude/&lt;provider&gt;/&lt;model&gt; mirror ids on /v1/models so Claude Code gateway model discovery lists non-Claude models. Warning: doubles catalog entries for all clients when enabled globally.",
+  "featureFlagAnthropicCompatibleMidConversationSystemDescription": "Keep mid-conversation system turns inside messages[] on plain anthropic-compatible relays when the client negotiated the mid-conversation-system beta, so the cached prompt prefix stays stable. Off by default.",
   "sidebar": {
     "home": "Home",
     "dashboard": "Dashboard",

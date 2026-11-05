@@ -55,7 +55,21 @@ export const ANTHROPIC_BETA_CLAUDE_OAUTH = [
 export const FORWARDABLE_CLIENT_BETAS = Object.freeze([
   "tool-search-tool-2025-10-19",
   "context-1m-2025-08-07",
+  "per-turn-control-2026-07-01",
 ]);
+
+/** Anthropic beta that admits `role: "system"` turns inside `messages[]`. */
+export const MID_CONVERSATION_SYSTEM_BETA = "mid-conversation-system-2026-04-07";
+
+/** Whether a Claude body still carries a system-role turn inside `messages[]`. */
+export function hasMidConversationSystemTurn(body: unknown): boolean {
+  const messages = (body as Record<string, unknown> | null | undefined)?.messages;
+  if (!Array.isArray(messages)) return false;
+  return messages.some((message) => {
+    const role = (message as Record<string, unknown> | null)?.role;
+    return typeof role === "string" && role.toLowerCase() === "system";
+  });
+}
 
 /**
  * Union an `anthropic-beta` comma-list with the allowlisted client-negotiated

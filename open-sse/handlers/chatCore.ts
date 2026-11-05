@@ -28,6 +28,7 @@ import {
 } from "./chatCore/headers.ts";
 import { markCodexScopeRateLimited } from "./chatCore/codexFailover.ts";
 import { isCodexOriginatedHeaders } from "../config/codexIdentity.ts";
+import { isFeatureFlagEnabled } from "../../src/shared/utils/featureFlags.ts";
 import { trackDevice, extractIpFromHeaders } from "../services/deviceTracker.ts";
 import { getCombosCached } from "./chatCore/comboContextCache.ts";
 export { clearCombosCache, clearUpstreamProxyConfigCache } from "./chatCore/comboContextCache.ts";
@@ -1984,7 +1985,23 @@ export async function handleChatCore({
   const normalizeClaudeUpstreamMessages = (
     payload: Record<string, unknown>,
     options?: { preserveToolResultBlocks?: boolean }
-  ) => normalizeClaudeUpstreamMessagesFor(payload, options, log);
+  ) =>
+    normalizeClaudeUpstreamMessagesFor(
+      payload,
+      {
+        ...options,
+        provider,
+        sourceFormat,
+        // #16236: in-place mid-conversation system turns are opt-in AND need the client's beta.
+        clientAnthropicBeta: getHeaderValueCaseInsensitive(
+          clientRawRequest?.headers ?? null,
+          "anthropic-beta"
+        ),
+        isMidConversationSystemEnabled: () =>
+          isFeatureFlagEnabled("ANTHROPIC_COMPATIBLE_MID_CONVERSATION_SYSTEM"),
+      },
+      log
+    );
 
   try {
     if (nativeCodexPassthrough) {

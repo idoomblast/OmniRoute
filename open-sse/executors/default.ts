@@ -12,9 +12,13 @@ import { getGigachatAccessToken } from "../services/gigachatAuth.ts";
 import { getRegistryEntry } from "../config/providerRegistry.ts";
 import { getModelTargetFormat } from "../config/providerModels.ts";
 import {
+  FORWARDABLE_CLIENT_BETAS,
+  MID_CONVERSATION_SYSTEM_BETA,
+  hasMidConversationSystemTurn,
   mergeClientAnthropicBeta,
   normalizeAnthropicHeaderVariants,
 } from "../config/anthropicHeaders.ts";
+import { isFeatureFlagEnabled } from "../../src/shared/utils/featureFlags.ts";
 import { isOfficialAnthropicBaseUrl } from "../utils/anthropicHost.ts";
 import { applyProviderRequestDefaults } from "../services/providerRequestDefaults.ts";
 import { stripUnsupportedParams } from "../translator/paramSupport.ts";
@@ -316,7 +320,14 @@ export class DefaultExecutor extends BaseExecutor {
     }
   }
 
-  buildHeaders(credentials, stream = true, clientHeaders?: Record<string, string> | null) {
+  buildHeaders(
+    credentials,
+    stream = true,
+    clientHeaders?: Record<string, string> | null,
+    _model?: string,
+    _health?: Record<string, unknown>,
+    body?: unknown
+  ) {
     const { headers, effectiveKey } = this.buildHeadersPreamble(credentials, stream);
 
     switch (this.provider) {
@@ -499,9 +510,22 @@ export class DefaultExecutor extends BaseExecutor {
       // 400 "Tool reference not found". Allowlist-merge preserves it without
       // forwarding betas the backend rejects.
       const clientBeta = clientHeaders["anthropic-beta"] ?? clientHeaders["Anthropic-Beta"] ?? null;
-      const betaKey = Object.keys(headers).find((key) => key.toLowerCase() === "anthropic-beta");
+      const isCompatRelay = this.provider?.startsWith?.("anthropic-compatible-") === true;
+      const betaKey =
+        Object.keys(headers).find((key) => key.toLowerCase() === "anthropic-beta") ??
+        (isCompatRelay ? "anthropic-beta" : null);
       if (betaKey && clientBeta) {
-        headers[betaKey] = mergeClientAnthropicBeta(headers[betaKey], clientBeta);
+        // #16236: on plain anthropic-compatible relays the opt-in passthrough keeps
+        // mid-conversation system turns in messages[], so the client's own beta token
+        // must travel too. Never invented: only merged when the client sent it.
+        const midConversationAllowed =
+          isCompatRelay &&
+          hasMidConversationSystemTurn(body) &&
+          isFeatureFlagEnabled("ANTHROPIC_COMPATIBLE_MID_CONVERSATION_SYSTEM");
+        const allow = midConversationAllowed
+          ? [...FORWARDABLE_CLIENT_BETAS, MID_CONVERSATION_SYSTEM_BETA]
+          : undefined;
+        headers[betaKey] = mergeClientAnthropicBeta(headers[betaKey] ?? "", clientBeta, allow);
       }
     }
 
