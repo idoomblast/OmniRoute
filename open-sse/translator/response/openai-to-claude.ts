@@ -8,11 +8,8 @@ import {
   isInternalReasoningPlaceholder,
   stripInternalReasoningPlaceholder,
 } from "../../utils/reasoningPlaceholder.ts";
-import { REVERSE_MAP } from "../../services/claudeCodeToolRemapper.ts";
-
-function normalizeToolName(name: string): string {
-  return REVERSE_MAP[name] ?? name;
-}
+import { restoreClaudeToolName } from "../../services/claudeCodeToolRemapper.ts";
+import { sanitizeToolId } from "../helpers/schemaCoercion.ts";
 
 interface XmlToolCall {
   id: string;
@@ -328,8 +325,11 @@ export function openaiToClaudeResponse(chunk, state) {
             index: toolInfo.blockIndex,
             content_block: {
               type: "tool_use",
-              id: toolInfo.id,
-              name: toolInfo.name || "",
+              id: sanitizeToolId(toolInfo.id),
+              name: restoreClaudeToolName(
+                toolInfo.name || "",
+                state.toolNameMap instanceof Map ? state.toolNameMap : null
+              ),
               input: {},
             },
           });
@@ -395,8 +395,11 @@ export function openaiToClaudeResponse(chunk, state) {
           index: toolInfo.blockIndex,
           content_block: {
             type: "tool_use",
-            id: toolInfo.id,
-            name: toolInfo.name || "",
+            id: sanitizeToolId(toolInfo.id),
+            name: restoreClaudeToolName(
+              toolInfo.name || "",
+              state.toolNameMap instanceof Map ? state.toolNameMap : null
+            ),
             input: {},
           },
         });
@@ -429,8 +432,13 @@ export function openaiToClaudeResponse(chunk, state) {
         index: blockIndex,
         content_block: {
           type: "tool_use",
-          id: tc.id,
-          name: normalizeToolName(tc.name),
+          id: sanitizeToolId(tc.id),
+          // #9008/#11487: prefer the request-side original casing; REVERSE_MAP
+          // only when no map entry exists (#7926 XML TitleCase -> lowercase).
+          name: restoreClaudeToolName(
+            tc.name,
+            state.toolNameMap instanceof Map ? state.toolNameMap : null
+          ),
           input: tc.args,
         },
       });

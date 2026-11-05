@@ -5,6 +5,8 @@ import {
 } from "../services/geminiThoughtSignatureStore.ts";
 import { normalizeOpenAICompatibleFinishReasonString } from "../utils/finishReason.ts";
 import { containsTextualToolCallMarker } from "../utils/textualToolCall.ts";
+import { restoreClaudeToolName } from "../services/claudeCodeToolRemapper.ts";
+import { sanitizeToolId } from "../translator/helpers/schemaCoercion.ts";
 import { getAnyReasoningValue } from "../utils/reasoningFields.ts";
 
 type JsonRecord = Record<string, unknown>;
@@ -567,7 +569,7 @@ export function translateNonStreamingResponse(
 
   // Phase 3: Translate from OpenAI back to Client Source format
   if (sourceFormat === FORMATS.CLAUDE && sourceFormat !== targetFormat) {
-    return convertOpenAINonStreamingToClaude(toRecord(intermediateOpenAI));
+    return convertOpenAINonStreamingToClaude(toRecord(intermediateOpenAI), toolNameMap ?? null);
   }
 
   // Gemini-family clients (Gemini, Antigravity): the streaming SSE path already
@@ -604,7 +606,10 @@ function resolveReasoningText(messageObj: JsonRecord): string {
 /**
  * Helper to convert an OpenAI chat.completion JSON object to Claude format for non-streaming.
  */
-function convertOpenAINonStreamingToClaude(openaiResponse: JsonRecord): JsonRecord {
+function convertOpenAINonStreamingToClaude(
+  openaiResponse: JsonRecord,
+  toolNameMap?: Map<string, string> | null
+): JsonRecord {
   const choices = openaiResponse.choices as unknown[] | undefined;
   const isChoicesArray = Array.isArray(choices);
   if (!isChoicesArray && openaiResponse.object !== "chat.completion") {
@@ -651,8 +656,10 @@ function convertOpenAINonStreamingToClaude(openaiResponse: JsonRecord): JsonReco
       const fn = toRecord(toolObj.function);
       content.push({
         type: "tool_use",
-        id: toString(toolObj.id, `call_${Date.now()}`),
-        name: toString(fn.name),
+        id: sanitizeToolId(toString(toolObj.id) || undefined),
+        // #11085/#11487: restore the caller's exact casing before Claude Code
+        // sees the tool name; identity echoes upgrade to canonical casing.
+        name: restoreClaudeToolName(toString(fn.name), toolNameMap ?? null),
         input:
           typeof fn.arguments === "string" ? JSON.parse(fn.arguments || "{}") : fn.arguments || {},
       });

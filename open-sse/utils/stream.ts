@@ -48,6 +48,7 @@ import {
 } from "./dsmlToolCall.ts";
 import { getModelSpec } from "@/shared/constants/modelSpecs.ts";
 import { recordToolLatency } from "../services/toolLatencyTracker.ts";
+import { restoreClaudeToolName } from "../services/claudeCodeToolRemapper.ts";
 import { extractToolSchemaMap } from "../translator/response/openai-responses/toolSchemas.ts";
 import {
   generateSessionId,
@@ -653,17 +654,22 @@ function getOpenAIIntermediateChunks(value: unknown): unknown[] {
   return Array.isArray(candidate) ? candidate : [];
 }
 
-function restoreClaudePassthroughToolUseName(parsed: JsonRecord, toolNameMap: unknown): boolean {
-  if (!(toolNameMap instanceof Map)) return false;
-  if (!parsed || typeof parsed !== "object") return false;
-
+export function restoreClaudePassthroughToolUseName(
+  parsed: JsonRecord,
+  toolNameMap: unknown
+): boolean {
   const block =
     parsed.content_block && typeof parsed.content_block === "object"
       ? (parsed.content_block as JsonRecord)
       : null;
   if (!block || block.type !== "tool_use" || typeof block.name !== "string") return false;
 
-  const restoredName = toolNameMap.get(block.name) ?? block.name;
+  // #10392/#11085: map lookup first, then canonical casing for known Claude
+  // Code tools; a request-declared alias always wins over the static table.
+  const restoredName = restoreClaudeToolName(
+    block.name,
+    toolNameMap instanceof Map ? toolNameMap : null
+  );
   if (restoredName === block.name) return false;
   block.name = restoredName;
   return true;

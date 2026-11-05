@@ -582,6 +582,10 @@ test("OpenAI -> Antigravity wraps Gemini requests in a Cloud Code envelope", () 
     "model",
     "userAgent",
     "requestType",
+    // #9008: identity tool-name mappings now travel with the envelope so the
+    // response path can restore the caller's exact casing; the executor strips
+    // this internal field before the upstream wire body.
+    "_toolNameMap",
   ]);
   assert.equal(result.userAgent, "antigravity");
   assert.equal(result.requestType, "agent");

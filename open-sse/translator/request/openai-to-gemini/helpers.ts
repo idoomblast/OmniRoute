@@ -37,10 +37,9 @@ type OpenAIToolCallLike = {
 export function buildChangedToolNameMap(
   toolNameMap: Map<string, string>
 ): Map<string, string> | null {
-  const changedEntries = [...toolNameMap.entries()].filter(
-    ([sanitizedName, originalName]) => sanitizedName !== originalName
-  );
-  return changedEntries.length > 0 ? new Map(changedEntries) : null;
+  // #9008: keep identity mappings so the response path can restore the
+  // caller's original casing after Gemini/Antigravity echoes a different one.
+  return toolNameMap.size > 0 ? new Map(toolNameMap) : null;
 }
 
 export function extractClientThoughtSignature(toolCall: unknown): string | null {
