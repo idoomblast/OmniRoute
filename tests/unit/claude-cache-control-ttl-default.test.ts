@@ -39,3 +39,23 @@ test("leaves non-ephemeral cache_control values alone", () => {
   normalizeCacheControlTtl(body);
   assert.deepEqual(body.system[0].cache_control, { type: "persistent" });
 });
+
+test("defaults to 1h before the first 5m breakpoint and to 5m after it", () => {
+  const body = {
+    tools: [{ name: "Bash", cache_control: { type: "ephemeral" } }],
+    system: [{ type: "text", text: "sys", cache_control: { type: "ephemeral", ttl: "5m" } }],
+    messages: [
+      {
+        role: "user",
+        content: [{ type: "text", text: "hi", cache_control: { type: "ephemeral" } }],
+      },
+    ],
+  };
+  normalizeCacheControlTtl(body);
+  assert.deepEqual(body.tools[0].cache_control, { type: "ephemeral", ttl: "1h" });
+  assert.deepEqual(body.system[0].cache_control, { type: "ephemeral", ttl: "5m" });
+  assert.deepEqual(body.messages[0].content[0].cache_control, {
+    type: "ephemeral",
+    ttl: "5m",
+  });
+});
