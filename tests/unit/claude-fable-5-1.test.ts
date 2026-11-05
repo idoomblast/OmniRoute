@@ -13,6 +13,7 @@ import { normalizeClaudeAdaptiveThinking } from "../../open-sse/services/claudeA
 import { getNextFamilyFallback } from "../../open-sse/services/modelFamilyFallback.ts";
 import { getStaticModelsForProvider } from "../../src/lib/providers/staticModels.ts";
 import { getDefaultPricing } from "../../src/shared/constants/pricing.ts";
+import { KNOWN_MODEL_PRICING } from "../../open-sse/services/providerCostData.ts";
 import {
   getModelSpec,
   normalizeForcedToolChoiceForModel,
@@ -114,4 +115,9 @@ test("Claude Fable 5.1 pricing matches Anthropic's published rates", () => {
   assert.equal(price.cached, 0.25);
   assert.equal(price.reasoning, 50);
   assert.equal(price.cache_creation, 12.5);
+  assert.deepEqual(KNOWN_MODEL_PRICING[MODEL_ID], {
+    inputCostPer1M: 10,
+    outputCostPer1M: 50,
+    isFree: false,
+  });
 });
