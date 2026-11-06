@@ -1029,7 +1029,7 @@ async function handleSingleModelChat(
     return handleComboChat({
       body,
       combo: redirectCombo,
-      sourceFormat: (resolved as any).sourceFormat ?? null,
+      sourceFormat,
       handleSingleModel: (
         b: any,
         m: string,

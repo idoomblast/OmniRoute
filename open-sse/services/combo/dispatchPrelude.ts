@@ -66,6 +66,7 @@ type PreludeBaseOptionArgs = {
   settings?: Record<string, unknown> | null;
   allCombos?: ComboCollectionLike;
   relayOptions?: HandleComboChatOptions["relayOptions"];
+  sourceFormat?: HandleComboChatOptions["sourceFormat"];
   signal?: AbortSignal | null;
   apiKeyAllowedConnections?: string[] | null;
 };
@@ -81,6 +82,7 @@ function buildBaseOptions(a: PreludeBaseOptionArgs): HandleComboChatOptions {
     settings: a.settings,
     allCombos: a.allCombos,
     relayOptions: a.relayOptions,
+    sourceFormat: a.sourceFormat,
     signal: a.signal,
     apiKeyAllowedConnections: a.apiKeyAllowedConnections,
   };
@@ -328,6 +330,7 @@ export async function tryFusionDispatch(args: {
   log: ComboLogger;
   settings?: Record<string, unknown> | null;
   relayOptions?: HandleComboChatOptions["relayOptions"];
+  sourceFormat?: HandleComboChatOptions["sourceFormat"];
   signal?: AbortSignal | null;
   apiKeyAllowedConnections?: string[] | null;
   runCombo: RunCombo;
@@ -521,6 +524,7 @@ export async function tryRuntimeUnitDispatch(args: {
   log: ComboLogger;
   settings?: Record<string, unknown> | null;
   relayOptions?: HandleComboChatOptions["relayOptions"];
+  sourceFormat?: HandleComboChatOptions["sourceFormat"];
   signal?: AbortSignal | null;
   apiKeyAllowedConnections?: string[] | null;
   runCombo: RunCombo;

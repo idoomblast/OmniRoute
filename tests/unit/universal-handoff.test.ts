@@ -200,6 +200,31 @@ test("injectUniversalHandoffBody Responses API without instructions", () => {
   assert.ok(!Array.isArray((r as any).messages));
 });
 
+test("injectUniversalHandoffBody appends to system[] for claude bodies", () => {
+  const body = {
+    model: CURR,
+    system: [{ type: "text", text: "Be terse" }],
+    messages: [{ role: "user", content: "Continue" }],
+  };
+  const r = injectUniversalHandoffBody(body, PREV, CURR, REASON, null, "claude");
+  const system = r.system as Array<{ type: string; text: string }>;
+  assert.ok(Array.isArray(system));
+  assert.strictEqual(system.length, 2);
+  assert.strictEqual(system[0].text, "Be terse");
+  assert.ok(system[1].text.includes("<context_handoff>"));
+  // The Claude branch must never smuggle a mid-conversation system turn in.
+  assert.deepStrictEqual(r.messages, body.messages);
+});
+
+test("injectUniversalHandoffBody seeds claude system[] when absent", () => {
+  const body = { model: CURR, messages: [{ role: "user", content: "Continue" }] };
+  const r = injectUniversalHandoffBody(body, PREV, CURR, REASON, null, "claude");
+  const system = r.system as Array<{ type: string; text: string }>;
+  assert.strictEqual(system.length, 1);
+  assert.ok(system[0].text.includes("<context_handoff>"));
+  assert.deepStrictEqual(r.messages, body.messages);
+});
+
 test("injectUniversalHandoffBody includes payload content", () => {
   const body = {
     model: CURR,
