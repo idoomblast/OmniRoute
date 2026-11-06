@@ -221,6 +221,8 @@ test("OpenAI -> Claude converts multimodal content, tool declarations, tool call
   assert.deepEqual(toolResultMessage.content[0], {
     type: "tool_result",
     tool_use_id: "call_weather",
+    // #15754: every Anthropic tool_result block now carries a boolean is_error.
+    is_error: false,
     content: [{ type: "text", text: "20C" }],
   });
 });
