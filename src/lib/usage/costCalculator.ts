@@ -120,6 +120,25 @@ export function getCodexFastCostMultiplier(
 }
 
 /**
+ * Long-context pricing tier: a row may carry `long_context: { threshold, inclusive?, ...rates }`
+ * (e.g. Claude Haiku 5.5 bills prompts above 100K cache-inclusive input tokens at 5x for the
+ * whole request). When the threshold is crossed, the tier's rates replace the flat ones for the
+ * whole request; any rate the tier omits keeps its flat value. Malformed tiers are ignored.
+ */
+function applyLongContextTier(
+  pricing: Record<string, unknown>,
+  inputTokens: number
+): Record<string, unknown> {
+  const tier = pricing.long_context;
+  if (!tier || typeof tier !== "object" || Array.isArray(tier)) return pricing;
+  const { threshold, inclusive, ...tierRates } = tier as Record<string, unknown>;
+  const limit = toNumber(threshold, Number.NaN);
+  if (!Number.isFinite(limit) || limit <= 0) return pricing;
+  const crossed = inclusive === true ? inputTokens >= limit : inputTokens > limit;
+  return crossed ? { ...pricing, ...tierRates } : pricing;
+}
+
+/**
  * Calculate cost for a usage entry.
  *
  * @param {string} provider
@@ -146,14 +165,15 @@ export function computeCostFromPricing(
   // per-token pricing rows exist only for estimation, so display surfaces opt in
   // to show $0 instead of an inflated estimate (#5552).
   if (options.flatRateAsZero && isFlatRateProvider(options.provider)) return 0;
-  const inputPrice = toNumber(pricing.input, 0);
-  const cachedPrice = toNumber(pricing.cached, inputPrice);
-  const outputPrice = toNumber(pricing.output, 0);
-  const reasoningPrice = toNumber(pricing.reasoning, outputPrice);
-  const cacheCreationPrice = toNumber(pricing.cache_creation, inputPrice);
+  const inputTokens = tokens.input ?? tokens.prompt_tokens ?? tokens.input_tokens ?? 0;
+  const rates = applyLongContextTier(pricing, inputTokens);
+  const inputPrice = toNumber(rates.input, 0);
+  const cachedPrice = toNumber(rates.cached, inputPrice);
+  const outputPrice = toNumber(rates.output, 0);
+  const reasoningPrice = toNumber(rates.reasoning, outputPrice);
+  const cacheCreationPrice = toNumber(rates.cache_creation, inputPrice);
 
   let cost = 0;
-  const inputTokens = tokens.input ?? tokens.prompt_tokens ?? tokens.input_tokens ?? 0;
   const cachedTokens =
     tokens.cacheRead ?? tokens.cached_tokens ?? tokens.cache_read_input_tokens ?? 0;
   const cacheCreationTokens = tokens.cacheCreation ?? tokens.cache_creation_input_tokens ?? 0;
