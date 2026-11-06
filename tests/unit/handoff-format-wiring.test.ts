@@ -10,24 +10,42 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+const { resolveInboundSourceFormat } = await import("../../open-sse/services/provider.ts");
+
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 function read(...parts: string[]): string {
   return readFileSync(join(root, ...parts), "utf8");
 }
 
-test("the combo safety-net redirect passes the in-scope sourceFormat", () => {
-  const chat = read("src", "sse", "handlers", "chat.ts");
-  // Shorthand property inside the redirect's handleComboChat({...}) call.
-  assert.match(chat, /\n\s+sourceFormat,\n/);
-  assert.ok(!/sourceFormat:\s*\(resolved as any\)\.sourceFormat/.test(chat));
+test("resolveInboundSourceFormat prefers the route over an ambiguous body", () => {
+  // An OpenAI body carrying max_tokens must not be read as Claude just because
+  // Claude also understands max_tokens.
+  const ambiguousBody = { model: "claude-opus-4-6", max_tokens: 1024, messages: [] };
+  assert.equal(resolveInboundSourceFormat(ambiguousBody, "/v1/messages", null), "claude");
+  assert.equal(resolveInboundSourceFormat(ambiguousBody, "/v1/chat/completions", null), "openai");
+  assert.equal(
+    resolveInboundSourceFormat(ambiguousBody, null, "https://host/v1/messages"),
+    "claude"
+  );
+  assert.equal(
+    resolveInboundSourceFormat(ambiguousBody, null, "https://host/v1/chat/completions"),
+    "openai"
+  );
 });
 
-test("nested combo dispatches rebuild options with sourceFormat", () => {
-  const combo = read("open-sse", "services", "combo.ts");
-  const prelude = read("open-sse", "services", "combo", "dispatchPrelude.ts");
-  assert.ok(prelude.includes('sourceFormat?: HandleComboChatOptions["sourceFormat"];'));
-  assert.ok(prelude.includes("sourceFormat: a.sourceFormat,"));
-  const forwarded = combo.match(/sourceFormat,\n\s+signal,/g) ?? [];
-  assert.equal(forwarded.length, 2, "fusion and runtime-unit dispatches must forward sourceFormat");
+test("the combo safety-net redirect derives its format before dispatch", () => {
+  const chat = read("src", "sse", "handlers", "chat.ts");
+  const start = chat.indexOf("if ((resolved as any).combo) {");
+  assert.ok(start >= 0, "safety-net redirect branch not found");
+  const end = chat.indexOf("const {\n    provider: resolvedProvider", start);
+  assert.ok(end > start, "redirect branch terminator not found");
+  const branch = chat.slice(start, end);
+
+  // The branch must derive the format itself: referencing the later
+  // destructured binding is a temporal-dead-zone ReferenceError.
+  assert.match(branch, /const redirectSourceFormat = resolveInboundSourceFormat\(/);
+  assert.match(branch, /sourceFormat: redirectSourceFormat,/);
+  assert.ok(!/\n\s+sourceFormat,\n/.test(branch), "redirect must not use a TDZ-shadowed binding");
+  assert.ok(!/sourceFormat:\s*\(resolved as any\)\.sourceFormat/.test(branch));
 });

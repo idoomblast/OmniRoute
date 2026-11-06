@@ -139,6 +139,21 @@ export function detectFormatFromUrl(body, requestUrl) {
   return detectFormatFromEndpoint(body, new URL(requestUrl).pathname);
 }
 
+// Resolve the inbound wire format from whatever the caller has on hand: the bare
+// endpoint path threaded through chatCore, or the full request URL. Route-based
+// detection wins over body shape (an OpenAI body may carry max_tokens or a
+// Claude-looking model name). Used by the combo safety-net redirect, which runs
+// before the normal destructuring yields sourceFormat (#18102 follow-up).
+export function resolveInboundSourceFormat(body, endpointPath, requestUrl) {
+  const endpoint =
+    typeof endpointPath === "string" && endpointPath
+      ? endpointPath
+      : typeof requestUrl === "string" && requestUrl
+        ? new URL(requestUrl).pathname
+        : "";
+  return detectFormatFromEndpoint(body, endpoint);
+}
+
 // Detect request format from body structure
 export function detectFormat(body) {
   // OpenAI Responses API:

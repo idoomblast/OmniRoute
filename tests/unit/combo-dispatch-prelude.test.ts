@@ -223,6 +223,36 @@ test("tryFusionDispatch: owns the request and synthesizes for the fusion strateg
   assert.ok(dispatched.includes("p/panelA") && dispatched.includes("p/panelB"));
 });
 
+test("tryFusionDispatch: a recursive combo-ref panel keeps the inbound sourceFormat", async () => {
+  // B2 (#18102 follow-up): the executable guard must observe the format the
+  // downstream runner actually receives, not merely a shared field.
+  const ctx = setup({
+    name: "fusion-ref",
+    strategy: "fusion",
+    models: [COMBO_REF_STEP],
+    config: { judgeModel: "p/judge" },
+  });
+  let recursedFormat: unknown = undefined;
+  const res = await tryFusionDispatch({
+    body: ctx.body,
+    combo: ctx.combo,
+    cfg: ctx.config as unknown as Record<string, unknown>,
+    config: ctx.config,
+    strategy: "fusion",
+    allCombos: [ctx.combo, LEAF_COMBO],
+    sourceFormat: "claude",
+    handleSingleModel: async () => okResponse("judge"),
+    handleSingleModelWithTimeout: async () => okResponse("panel"),
+    log: ctx.log,
+    runCombo: async (options) => {
+      recursedFormat = options.sourceFormat;
+      return okResponse("recursed");
+    },
+  });
+  assert.ok(res, "fusion strategy must own the request");
+  assert.equal(recursedFormat, "claude", "the recursive combo-ref must receive the sourceFormat");
+});
+
 test("tryRuntimeUnitDispatch: falls through when the combo has no executable combo-ref", async () => {
   const ctx = setup({
     name: "flat",
@@ -284,6 +314,38 @@ test("tryRuntimeUnitDispatch: owns the request in execute mode with a simple str
   });
   assert.ok(res, "execute mode + priority must dispatch the combo-ref as a black-box unit");
   assert.equal(recursedInto, "leaf", "the referenced combo must be executed recursively");
+});
+
+test("tryRuntimeUnitDispatch: the recursive runner receives the inbound sourceFormat", async () => {
+  const ctx = setup({
+    name: "parent",
+    strategy: "priority",
+    models: [COMBO_REF_STEP],
+    config: { nestedComboMode: "execute" },
+  });
+  let recursedFormat: unknown = undefined;
+  const res = await tryRuntimeUnitDispatch({
+    body: ctx.body,
+    combo: ctx.combo,
+    config: ctx.config,
+    strategy: "priority",
+    allCombos: [ctx.combo, LEAF_COMBO],
+    sourceFormat: "claude",
+    handleSingleModel: async () => okResponse("x"),
+    handleSingleModelWithTimeout: async () => okResponse("x"),
+    log: ctx.log,
+    settings: {},
+    runCombo: async (options) => {
+      recursedFormat = options.sourceFormat;
+      return okResponse("recursed");
+    },
+  });
+  assert.ok(res, "execute mode + priority must dispatch the combo-ref");
+  assert.equal(
+    recursedFormat,
+    "claude",
+    "the recursive child runner must receive the sourceFormat"
+  );
 });
 
 test("tryRuntimeUnitDispatch: falls through in flatten mode even when a combo-ref is present", async () => {

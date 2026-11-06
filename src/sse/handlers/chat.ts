@@ -33,7 +33,11 @@ import {
   HTTP_STATUS,
   ANTIGRAVITY_PRE_RESPONSE_TIMEOUT_CODE,
 } from "@omniroute/open-sse/config/constants.ts";
-import { getTargetFormat, detectFormatFromUrl } from "@omniroute/open-sse/services/provider.ts";
+import {
+  getTargetFormat,
+  detectFormatFromUrl,
+  resolveInboundSourceFormat,
+} from "@omniroute/open-sse/services/provider.ts";
 import {
   getModelsByProviderId,
   getModelTargetFormat,
@@ -1019,6 +1023,14 @@ async function handleSingleModelChat(
   // to combo flow. This handles the case where the auto-fuzzy match in
   // resolveModelOrError found a combo but the main handler's combo lookup missed it.
   if ((resolved as any).combo) {
+    // B1 (#18102 follow-up): this branch runs before the destructuring that
+    // yields `sourceFormat`, so derive the authoritative inbound format here.
+    // Referencing the later binding is a temporal-dead-zone ReferenceError.
+    const redirectSourceFormat = resolveInboundSourceFormat(
+      body,
+      clientRawRequest?.endpoint,
+      request?.url
+    );
     const redirectCombo = (resolved as any).combo;
     log.info(
       "ROUTING",
@@ -1029,7 +1041,7 @@ async function handleSingleModelChat(
     return handleComboChat({
       body,
       combo: redirectCombo,
-      sourceFormat,
+      sourceFormat: redirectSourceFormat,
       handleSingleModel: (
         b: any,
         m: string,
