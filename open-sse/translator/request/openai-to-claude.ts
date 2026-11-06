@@ -3,7 +3,7 @@ import { FORMATS } from "../formats.ts";
 // CLAUDE_SYSTEM_PROMPT import removed — no longer injected unconditionally (#1966/#2130)
 import { supportsClaudeMaxEffort, supportsXHighEffort } from "../../config/providerModels.ts";
 import { adjustMaxTokens } from "../helpers/maxTokensHelper.ts";
-import { sanitizeToolId } from "../helpers/schemaCoercion.ts";
+import { normalizeClaudeToolInputSchema, sanitizeToolId } from "../helpers/schemaCoercion.ts";
 import { safeParseJSON } from "../helpers/jsonUtil.ts";
 import { applyKimiCodingThinking } from "../helpers/claudeHelper.ts";
 import { DEFAULT_THINKING_CLAUDE_SIGNATURE } from "../../config/defaultThinkingSignature.ts";
@@ -11,6 +11,7 @@ import { isAdaptiveThinkingOnly } from "../../../src/shared/constants/modelSpecs
 import { fitThinkingToMaxTokens } from "./openai-to-claude/thinkingBudget.ts";
 import { enforceToolResultAdjacency } from "./openai-to-claude/toolResultAdjacency.ts";
 import { sanitizeToolResultId } from "./openai-to-claude/sanitizeToolResultId.ts";
+import { unwrapOpenAIToolDefinition } from "./openai-to-claude/unwrapToolDefinition.ts";
 
 // Reasoning-effort levels Anthropic accepts on `output_config.effort`. Used to steer
 // adaptive-only Claude models (Opus 4.7+/Fable 5) without ever emitting a manual budget.
@@ -372,15 +373,11 @@ export function openaiToClaudeRequest(model, body, stream, credentials = null) {
   if (body.tools && Array.isArray(body.tools)) {
     result.tools = body.tools
       .map((tool) => {
-        // Function-shaped tools arrive in two flavors from real clients:
-        //   (a) openai-spec: { type: "function", function: { name, ... } }
-        //   (b) bare/loose:  { function: { name, ... } }   (no parent `type`)
-        // Unwrap `tool.function` whenever it is present, regardless of the
-        // parent `type` field — some OpenAI-shape clients omit the wrapper's
-        // `type: "function"` entirely. Previously that bare shape fell
-        // through to `toolData = tool` (the wrapper itself, with no `.name`),
-        // producing an empty `originalName` and silently dropping the tool.
-        const toolData = tool.function ?? tool;
+        // A null (or non-object) entry is dropped, like an entry without a name.
+        if (!tool || typeof tool !== "object") return null;
+        // Unwrap spec, bare `{ function }` and Chat Completions `{ type: "custom", custom }`
+        // tools; reading the name off the wrapper itself silently dropped the tool.
+        const toolData = unwrapOpenAIToolDefinition(tool);
         const originalName = typeof toolData.name === "string" ? toolData.name.trim() : "";
 
         if (!originalName) {
@@ -398,17 +395,26 @@ export function openaiToClaudeRequest(model, body, stream, credentials = null) {
 
         // Normalize input_schema: Anthropic requires `properties` when type is "object" (#595).
         // MCP tools (e.g. pencil, computer_use) may omit properties on object-type schemas.
-        const rawSchema: Record<string, unknown> = toolData.parameters ||
-          toolData.input_schema || { type: "object", properties: {}, required: [] };
-        const normalizedSchema =
+        const rawSchema = (toolData.parameters ||
+          toolData.input_schema || { type: "object", properties: {}, required: [] }) as Record<
+          string,
+          unknown
+        >;
+        const withProperties =
           rawSchema.type === "object" && !rawSchema.properties
             ? { ...rawSchema, properties: {} }
             : rawSchema;
+        // Flatten a root-level anyOf/oneOf/allOf: Anthropic refuses it outright with
+        // "input_schema does not support oneOf, allOf, or anyOf at the top level" (#13552).
+        const normalizedSchema = normalizeClaudeToolInputSchema(withProperties);
 
         return {
           name: toolName,
           description: toolData.description || "",
           input_schema: normalizedSchema,
+          // Anthropic tools accept `strict` (structured tool inputs); dropping it silently
+          // relaxed schema enforcement the client asked for (9router#4172).
+          ...(toolData.strict === true ? { strict: true } : {}),
         };
       })
       .filter((tool): tool is ClaudeTool => Boolean(tool));
