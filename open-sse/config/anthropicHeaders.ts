@@ -189,6 +189,10 @@ export const FORWARDABLE_CLIENT_BETAS = Object.freeze([
   "server-side-fallback-2026-07-01",
   "timing-2026-09-09",
   "inline-tools-2026-09-15",
+  // Top-level `thread` {type:create|continue,previous_message_id} (#15705), captured from
+  // @anthropic-ai/claude-code@2.1.291 (`v("message_threads","message-threads-2026-08-12")`).
+  // The body field passes through; without this beta upstream 400s "thread: Extra inputs".
+  "message-threads-2026-08-12",
   "thinking-binding-controls-2026-08-01",
   "thinking-display-updates-2026-08-18",
   "skills-2025-10-02",
