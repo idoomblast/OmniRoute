@@ -167,8 +167,13 @@ export function openaiToClaudeRequest(model, body, stream, credentials = null) {
   if (body.temperature === undefined && body.top_p !== undefined) {
     result.top_p = body.top_p;
   }
-  if (body.stop !== undefined) {
-    result.stop_sequences = Array.isArray(body.stop) ? body.stop : [body.stop];
+  // `stop: null` is how many OpenAI-compatible clients serialize "no stop"; wrapping it
+  // would send `stop_sequences: [null]`, which Anthropic rejects with a 400.
+  const stopSequences = (Array.isArray(body.stop) ? body.stop : [body.stop]).filter(
+    (value) => typeof value === "string" && value !== ""
+  );
+  if (stopSequences.length > 0) {
+    result.stop_sequences = stopSequences;
   }
 
   // Thinking configuration
@@ -665,7 +670,7 @@ function getContentBlocksFromMessage(
             type: "tool_use",
             id: sanitizeToolId(tc.id),
             name: toolName,
-            input: tryParseJSON(tc.function.arguments),
+            input: parseToolInput(tc.function.arguments),
           });
         }
       }
@@ -721,8 +726,10 @@ function convertOpenAIToolChoice(choice) {
     if (choice.type === "function" && choice.function?.name) {
       return { type: "tool", name: choice.function.name };
     }
-    // Map OpenAI string types to Claude equivalents
-    if (choice.type === "auto" || choice.type === "none") return { type: "auto" };
+    // Map OpenAI string types to Claude equivalents. Claude has its own "none"; mapping it
+    // to "auto" let the model call tools the client had switched off.
+    if (choice.type === "auto") return { type: "auto" };
+    if (choice.type === "none") return { type: "none" };
     if (choice.type === "required" || choice.type === "any")
       return { type: CLAUDE_TOOL_CHOICE_REQUIRED };
     // If type is "tool" already (Claude-native), pass through
@@ -730,7 +737,8 @@ function convertOpenAIToolChoice(choice) {
     // Fallback: unknown object type — default to auto to avoid 400 errors
     return { type: "auto" };
   }
-  if (choice === "auto" || choice === "none") return { type: "auto" };
+  if (choice === "auto") return { type: "auto" };
+  if (choice === "none") return { type: "none" };
   if (choice === "required") return { type: CLAUDE_TOOL_CHOICE_REQUIRED };
   if (typeof choice === "object" && choice.function) {
     return { type: "tool", name: choice.function.name };
@@ -750,9 +758,10 @@ function extractTextContent(content) {
   return "";
 }
 
-// Try parse JSON (passthrough fallback: return the raw input string on parse error).
-function tryParseJSON(str: unknown): unknown {
-  return safeParseJSON(str, str);
+function parseToolInput(args: unknown): Record<string, unknown> {
+  const parsed = safeParseJSON(args, null);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  return parsed as Record<string, unknown>;
 }
 
 function stripCacheControl(value: unknown): unknown {
