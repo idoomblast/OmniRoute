@@ -45,7 +45,11 @@ test("xhigh-capable entries declare supportsXHighEffort; 4.6/4.5 must not", () =
     if (tiers.includes("xhigh")) {
       assert.equal(model.supportsXHighEffort, true, `claude/${modelId}`);
     } else {
-      assert.notEqual(model.supportsXHighEffort, true, `claude/${modelId} must not advertise xhigh`);
+      assert.notEqual(
+        model.supportsXHighEffort,
+        true,
+        `claude/${modelId} must not advertise xhigh`
+      );
     }
   }
 });

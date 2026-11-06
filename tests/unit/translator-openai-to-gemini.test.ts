@@ -53,7 +53,6 @@ function getFunctionDeclarationParameters(parameters: unknown) {
     $schema?: unknown;
   };
 }
-
 test("OpenAI -> Gemini helper converts text, images and files into Gemini parts", () => {
   const parts = convertOpenAIContentToParts([
     { type: "text", text: "Hello" },
@@ -582,9 +581,6 @@ test("OpenAI -> Antigravity wraps Gemini requests in a Cloud Code envelope", () 
     "model",
     "userAgent",
     "requestType",
-    // #9008: identity tool-name mappings now travel with the envelope so the
-    // response path can restore the caller's exact casing; the executor strips
-    // this internal field before the upstream wire body.
     "_toolNameMap",
   ]);
   assert.equal(result.userAgent, "antigravity");

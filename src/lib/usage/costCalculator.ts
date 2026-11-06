@@ -131,9 +131,18 @@ function applyLongContextTier(
 ): Record<string, unknown> {
   const tier = pricing.long_context;
   if (!tier || typeof tier !== "object" || Array.isArray(tier)) return pricing;
-  const { threshold, inclusive, ...tierRates } = tier as Record<string, unknown>;
+  const { threshold, inclusive } = tier as Record<string, unknown>;
   const limit = toNumber(threshold, Number.NaN);
   if (!Number.isFinite(limit) || limit <= 0) return pricing;
+  // Validate every provided rate before merging: an unchecked spread would turn
+  // a malformed persisted row into a zero or negative price.
+  const tierRates: Record<string, number> = {};
+  for (const key of ["input", "cached", "output", "reasoning", "cache_creation"] as const) {
+    const value = (tier as Record<string, unknown>)[key];
+    if (value === undefined) continue;
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return pricing;
+    tierRates[key] = value;
+  }
   const crossed = inclusive === true ? inputTokens >= limit : inputTokens > limit;
   return crossed ? { ...pricing, ...tierRates } : pricing;
 }

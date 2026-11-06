@@ -111,6 +111,33 @@ async function hasOnlyActiveCodexAccount() {
   }
 }
 
+/**
+ * Normalize an `allowedConnectionIds`-style value to a non-empty string array.
+ * Moved out of chat.ts so the handler stays under the frozen file-size cap.
+ */
+export function normalizeAllowedConnectionIds(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const ids = value.filter(
+    (entry): entry is string => typeof entry === "string" && entry.trim().length > 0
+  );
+  return ids.length > 0 ? ids : null;
+}
+
+/** Intersect two allowed-connection filters; one side wins when the other is absent. */
+export function intersectAllowedConnectionIds(
+  primary: unknown,
+  secondary: unknown
+): string[] | null {
+  const first = normalizeAllowedConnectionIds(primary);
+  const second = normalizeAllowedConnectionIds(secondary);
+
+  if (first && second) {
+    return first.filter((id) => second.includes(id));
+  }
+
+  return first || second || null;
+}
+
 export async function resolveModelOrError(
   modelStr: string,
   body: any,

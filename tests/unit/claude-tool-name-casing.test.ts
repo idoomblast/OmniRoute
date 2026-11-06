@@ -31,10 +31,7 @@ describe("Claude tool name casing preservation (#11487)", () => {
 
   it("restores mapped lowercase tools when toolNameMap was recorded from request", () => {
     const reqBody = {
-      tools: [
-        { name: "bash" },
-        { name: "read" },
-      ],
+      tools: [{ name: "bash" }, { name: "read" }],
     };
     remapToolNamesInRequest(reqBody);
     const map = (reqBody as Record<string, unknown>)._toolNameMap as Map<string, string>;
@@ -48,10 +45,7 @@ describe("Claude tool name casing preservation (#11487)", () => {
       choices: [
         {
           delta: {
-            tool_calls: [
-              { function: { name: "Bash" } },
-              { function: { name: "Write" } },
-            ],
+            tool_calls: [{ function: { name: "Bash" } }, { function: { name: "Write" } }],
           },
         },
       ],

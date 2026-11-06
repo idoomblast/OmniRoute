@@ -13,7 +13,10 @@ function contentAt(messages: Message[], index: number): Block {
 test("advances the breakpoint to a new last user turn after an earlier one is cached", () => {
   const body = {
     messages: [
-      { role: "user", content: [{ type: "text", text: "one", cache_control: { type: "ephemeral" } }] },
+      {
+        role: "user",
+        content: [{ type: "text", text: "one", cache_control: { type: "ephemeral" } }],
+      },
       { role: "assistant", content: [{ type: "text", text: "two" }] },
       { role: "user", content: [{ type: "text", text: "three" }] },
     ] as Message[],

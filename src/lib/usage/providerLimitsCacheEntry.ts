@@ -56,7 +56,7 @@ export function mergeProviderLimitsCacheEntry(
   if (!previous) return next;
   const previousUsable = Boolean(
     (previous.quotas && Object.keys(previous.quotas).length > 0) ||
-      (previous.modelQuotas && Object.keys(previous.modelQuotas).length > 0)
+    (previous.modelQuotas && Object.keys(previous.modelQuotas).length > 0)
   );
   if (!next.quotas && next.message && previousUsable) return previous;
   return next;

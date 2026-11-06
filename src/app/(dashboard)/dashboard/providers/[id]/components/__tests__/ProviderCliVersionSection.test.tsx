@@ -153,7 +153,6 @@ describe("ProviderCliVersionSection", () => {
     expect(text).toContain("Billing caveat");
   });
 
-
   it("PUTs only this provider's key on save and re-reads the resolved status", async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     vi.stubGlobal(

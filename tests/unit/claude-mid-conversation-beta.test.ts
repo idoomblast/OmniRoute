@@ -14,7 +14,10 @@ const body = {
 
 test("mid-conversation system is enabled for Opus with system and tools", () => {
   assert.equal(shouldUseMidConversationSystem(body, "claude-opus-5"), true);
-  assert.equal(selectBetaFlags(body, "claude-opus-5").includes("mid-conversation-system-2026-04-07"), true);
+  assert.equal(
+    selectBetaFlags(body, "claude-opus-5").includes("mid-conversation-system-2026-04-07"),
+    true
+  );
 });
 
 test("mid-conversation system stays off without tools or for legacy models", () => {

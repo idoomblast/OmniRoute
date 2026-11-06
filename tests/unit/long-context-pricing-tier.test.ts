@@ -56,6 +56,34 @@ test("a malformed tier is ignored instead of corrupting the estimate", () => {
   assertCost(cost, 0.02);
 });
 
+test("a tier with any invalid rate falls back to the flat rates", () => {
+  for (const [key, value] of [
+    ["input", -0.5],
+    ["output", "2.5"],
+    ["cached", null],
+    ["reasoning", Number.NaN],
+    ["cache_creation", Number.POSITIVE_INFINITY],
+  ] as const) {
+    const broken = {
+      ...HAIKU_5_5,
+      long_context: { ...HAIKU_5_5.long_context, [key]: value },
+    };
+    const cost = computeCostFromPricing(broken, { input: 200_000, output: 1_000 });
+    // Flat rates: 200k * $0.10/M + 1k * $0.50/M
+    assertCost(cost, 0.0205);
+  }
+});
+
+test("a valid subset of tier rates overrides only those keys", () => {
+  const partial = {
+    ...HAIKU_5_5,
+    long_context: { threshold: 100_000, input: 0.5 },
+  };
+  const cost = computeCostFromPricing(partial, { input: 200_000, output: 1_000 });
+  // 200k * tier input $0.50/M + 1k * flat output $0.50/M
+  assertCost(cost, 0.1005);
+});
+
 test("the inclusive flag switches at the threshold, not past it", () => {
   const inclusive = {
     ...HAIKU_5_5,

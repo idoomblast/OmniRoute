@@ -73,6 +73,8 @@ import {
   withSessionHeader,
   withSelectedConnectionHeader,
   withCorrelationId,
+  normalizeAllowedConnectionIds,
+  intersectAllowedConnectionIds,
 } from "./chatHelpers";
 import {
   isAntigravityMissingProjectError,
@@ -206,25 +208,6 @@ async function getCombosCachedForChat(): Promise<unknown[]> {
   combosCacheVersionSnapshot = getCombosCacheVersion();
   combosCachePromise = getCombos().catch(() => []);
   return combosCachePromise;
-}
-
-function normalizeAllowedConnectionIds(value: unknown): string[] | null {
-  if (!Array.isArray(value)) return null;
-  const ids = value.filter(
-    (entry): entry is string => typeof entry === "string" && entry.trim().length > 0
-  );
-  return ids.length > 0 ? ids : null;
-}
-
-function intersectAllowedConnectionIds(primary: unknown, secondary: unknown): string[] | null {
-  const first = normalizeAllowedConnectionIds(primary);
-  const second = normalizeAllowedConnectionIds(secondary);
-
-  if (first && second) {
-    return first.filter((id) => second.includes(id));
-  }
-
-  return first || second || null;
 }
 
 const comboPromoteDeps = { updateCombo, info: log.info, warn: log.warn };
@@ -778,6 +761,7 @@ export async function handleChat(
     const response = await (handleComboChat as any)({
       body,
       combo,
+      sourceFormat,
       handleSingleModel: (
         b: any,
         m: string,
@@ -1045,6 +1029,7 @@ async function handleSingleModelChat(
     return handleComboChat({
       body,
       combo: redirectCombo,
+      sourceFormat: (resolved as any).sourceFormat ?? null,
       handleSingleModel: (
         b: any,
         m: string,

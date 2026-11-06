@@ -35,9 +35,8 @@ const core = await import("../../src/lib/db/core.ts");
 const { handleChatCore } = await import("../../open-sse/handlers/chatCore.ts");
 const callLogs = await import("../../src/lib/usage/callLogs.ts");
 // Newer upstream builds queue call-log writes; this base writes them inline.
-const waitForCallLogSaves = (
-  callLogs as { waitForCallLogSaves?: (ms: number) => Promise<boolean> }
-).waitForCallLogSaves;
+const waitForCallLogSaves = (callLogs as { waitForCallLogSaves?: (ms: number) => Promise<boolean> })
+  .waitForCallLogSaves;
 const closeCallLogSaves = (callLogs as { closeCallLogSaves?: (ms: number) => Promise<void> })
   .closeCallLogSaves;
 

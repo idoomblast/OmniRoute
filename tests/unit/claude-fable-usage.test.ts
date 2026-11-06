@@ -15,9 +15,8 @@ const { parseQuotaData } =
 const { GET } = await import("../../src/app/api/usage/[connectionId]/route.ts");
 const { createProviderConnection } = await import("../../src/lib/db/providers.ts");
 const { getProviderLimitsCache } = await import("../../src/lib/db/providerLimits.ts");
-const { mergeProviderLimitsCacheEntry } = await import(
-  "../../src/lib/usage/providerLimitsCacheEntry.ts"
-);
+const { mergeProviderLimitsCacheEntry } =
+  await import("../../src/lib/usage/providerLimitsCacheEntry.ts");
 const { getQuotaCache } = await import("../../src/domain/quotaCache.ts");
 const { resetDbInstance } = await import("../../src/lib/db/core.ts");
 const originalFetch = globalThis.fetch;

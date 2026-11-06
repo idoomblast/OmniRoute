@@ -95,7 +95,6 @@ function isTruthyEnvFlag(value: string | undefined): boolean {
   return new Set(["1", "true", "yes", "on"]).has(value.trim().toLowerCase());
 }
 
-
 function toRecord(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : {};
 }

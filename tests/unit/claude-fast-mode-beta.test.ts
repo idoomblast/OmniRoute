@@ -32,7 +32,11 @@ test("mergeClientAnthropicBeta does not add the fast-mode beta the client did no
 });
 
 test("selectBetaFlags emits the fast-mode beta for a body carrying speed", () => {
-  const flags = selectBetaFlags({ model: "claude-opus-5", speed: "fast", messages: [] }, null, null);
+  const flags = selectBetaFlags(
+    { model: "claude-opus-5", speed: "fast", messages: [] },
+    null,
+    null
+  );
 
   assert.ok(flags.split(",").includes(FAST_MODE_BETA), "a speed-carrying body gates its own beta");
 });

@@ -32,7 +32,6 @@ import {
   recordComboFailure,
 } from "./combo/failureTracker.ts";
 import { buildNoUpstreamResponseDiagnostics, buildRecoveryHint } from "./combo/pinRecovery.ts";
-import { detectFormat } from "./provider.ts";
 import { buildTargetTimeoutRunner } from "./combo/targetTimeoutRunner.ts";
 import { recordComboRequest, recordComboShadowRequest, getComboMetrics } from "./comboMetrics.ts";
 import {
@@ -1152,16 +1151,13 @@ export async function handleComboChat({
             const lastModel = getLastSessionModel(relayOptions.sessionId, combo.name);
             if (lastModel && lastModel !== modelStr) {
               const existingHandoff = getHandoff(relayOptions.sessionId, combo.name);
-              // #12668: callers do not always thread sourceFormat; the body
-              // shape is enough to reach the Claude in-place handoff branch.
-              const handoffSourceFormat = sourceFormat ?? detectFormat(attemptBody);
               attemptBody = injectUniversalHandoffBody(
                 attemptBody, // Use the cloned body to maintain isolation
                 lastModel,
                 modelStr,
                 `Model routing: ${lastModel} → ${modelStr}`,
                 existingHandoff,
-                handoffSourceFormat
+                sourceFormat
               );
             }
           }

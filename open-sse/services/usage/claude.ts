@@ -36,6 +36,16 @@ async function proxiedOrDirect(
   return globalThis.fetch(url, init);
 }
 
+/**
+ * Bootstrap must use the same egress as the usage read: when the connection has
+ * an assigned proxy, a direct bootstrap would leak the bearer token on the host
+ * IP (and survive a dead proxy that the usage call fails closed on).
+ */
+function bootstrapFetchFor(connectionId?: string) {
+  if (!connectionId) return undefined;
+  return (url: string, init: RequestInit) => fetchWithConnectionProxy(connectionId, url, init);
+}
+
 // Claude API config
 const CLAUDE_CONFIG = {
   oauthUsageUrl: "https://api.anthropic.com/api/oauth/usage",
@@ -180,12 +190,16 @@ async function fetchClaudeUsage(
     if (cached) return staleFromCache(cached);
     return {
       message: RATE_LIMITED_MESSAGE,
-      bootstrap: await fetchClaudeBootstrap(accessToken).catch(() => null),
+      bootstrap: await fetchClaudeBootstrap(accessToken, bootstrapFetchFor(connectionId)).catch(
+        () => null
+      ),
     };
   }
 
   // Refresh bootstrap in parallel; best-effort, failure non-fatal.
-  const bootstrapPromise = fetchClaudeBootstrap(accessToken).catch(() => null);
+  const bootstrapPromise = fetchClaudeBootstrap(accessToken, bootstrapFetchFor(connectionId)).catch(
+    () => null
+  );
   try {
     // Real CLI uses axios here, not Stainless — UA is `claude-code/<version>`
     // (not `claude-cli/...`) and the shape is simpler than /v1/messages.

@@ -15,7 +15,10 @@ function layout(payload: Record<string, unknown>): { sys: number; msg: number } 
   const marked = (blocks: unknown): number =>
     Array.isArray(blocks)
       ? blocks.filter(
-          (b) => b !== null && typeof b === "object" && (b as Record<string, unknown>).cache_control != null
+          (b) =>
+            b !== null &&
+            typeof b === "object" &&
+            (b as Record<string, unknown>).cache_control != null
         ).length
       : 0;
   const messages = (Array.isArray(payload.messages) ? payload.messages : []) as Array<{
@@ -181,11 +184,15 @@ test("two consecutive marked system messages compete for the same target", () =>
       { role: "user", content: [{ type: "text", text: "turn 1" }] },
       {
         role: "system",
-        content: [{ type: "text", text: "note a", cache_control: { type: "ephemeral", ttl: "5m" } }],
+        content: [
+          { type: "text", text: "note a", cache_control: { type: "ephemeral", ttl: "5m" } },
+        ],
       },
       {
         role: "system",
-        content: [{ type: "text", text: "note b", cache_control: { type: "ephemeral", ttl: "1h" } }],
+        content: [
+          { type: "text", text: "note b", cache_control: { type: "ephemeral", ttl: "1h" } },
+        ],
       },
       { role: "user", content: [{ type: "text", text: "turn 2" }] },
     ],
@@ -377,9 +384,7 @@ test("a marker relocated onto an inlined document survives its conversion to tex
     messages: [
       {
         role: "user",
-        content: [
-          { type: "document", name: "notes.txt", document: {}, content: "document body" },
-        ],
+        content: [{ type: "document", name: "notes.txt", document: {}, content: "document body" }],
       },
       {
         role: "system",

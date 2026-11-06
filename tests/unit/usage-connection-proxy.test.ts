@@ -61,9 +61,9 @@ test.after(() => __setProxyHealthTcpCheckForTesting(null));
 
 test("claude reading with an assigned proxy runs inside the proxy context", async () => {
   useAssignedProxy();
-  let observedInContext: boolean | null = null;
-  globalThis.fetch = (async () => {
-    observedInContext = hasAmbientProxyContext();
+  const observed: Array<{ url: string; proxied: boolean }> = [];
+  globalThis.fetch = (async (url: unknown) => {
+    observed.push({ url: String(url), proxied: hasAmbientProxyContext() });
     return new Response(
       JSON.stringify({
         five_hour: { utilization: 10, resets_at: null },
@@ -77,8 +77,11 @@ test("claude reading with an assigned proxy runs inside the proxy context", asyn
     accessToken: "unit-token-proxy",
     id: "conn-claude-proxy",
   })) as { quotas?: Record<string, { used?: number }> };
-  assert.equal(observedInContext, true);
   assert.equal(result.quotas?.["session (5h)"].used, 10);
+  // Every authenticated subrequest of the reading, bootstrap included, must use
+  // the connection's egress — a direct bootstrap would leak the bearer token.
+  assert.ok(observed.some((call) => call.url.includes("/api/claude_cli/bootstrap")));
+  assert.ok(observed.every((call) => call.proxied));
 });
 
 test("claude reading without a proxy calls the OAuth endpoint directly", async () => {
@@ -114,13 +117,11 @@ test("a proxied claude failure surfaces the existing message without a direct re
     accessToken: "unit-token-blocked",
     id: "conn-claude-blocked",
   })) as { message?: string };
-  // The proxied read fails closed: the OAuth attempt and the legacy fallback all
-  // run inside the proxy context, never a direct retry.
-  // The bootstrap read is best-effort and intentionally direct; every usage
-  // request must stay inside the proxy context.
-  const usageCalls = observed.filter((call) => !call.url.includes("/api/claude_cli/bootstrap"));
-  assert.ok(usageCalls.length >= 1);
-  assert.ok(usageCalls.every((call) => call.proxied));
+  // The proxied read fails closed: the OAuth attempt, the legacy fallback, and
+  // the bootstrap read all run inside the proxy context, never a direct retry.
+  assert.ok(observed.some((call) => call.url.includes("/api/claude_cli/bootstrap")));
+  assert.ok(observed.length >= 1);
+  assert.ok(observed.every((call) => call.proxied));
   assert.match(String(result.message), /Usage API requires admin permissions/);
 });
 

@@ -204,4 +204,3 @@ test("getSettings() ships the cliVersionOverrides default on a fresh DB", async 
   const settings = await settingsDb.getSettings();
   assert.deepEqual(settings.cliVersionOverrides, {});
 });
-

@@ -163,11 +163,17 @@ export type ClaudeBootstrap = {
 };
 
 /** GET /api/claude_cli/bootstrap with the same headers real CLI uses. */
-export async function fetchClaudeBootstrap(accessToken: string): Promise<ClaudeBootstrap | null> {
+type BootstrapFetch = (url: string, init: RequestInit) => Promise<Response | null>;
+
+export async function fetchClaudeBootstrap(
+  accessToken: string,
+  fetchImpl?: BootstrapFetch
+): Promise<ClaudeBootstrap | null> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), BOOTSTRAP_FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch("https://api.anthropic.com/api/claude_cli/bootstrap", {
+    const url = "https://api.anthropic.com/api/claude_cli/bootstrap";
+    const init: RequestInit = {
       method: "GET",
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -176,8 +182,11 @@ export async function fetchClaudeBootstrap(accessToken: string): Promise<ClaudeB
         "anthropic-beta": "oauth-2025-04-20",
       },
       signal: ctrl.signal,
-    });
-    if (!res.ok) return null;
+    };
+    // Callers that know the connection pass a proxy-bound fetch so the bearer
+    // token never egresses on the host IP when the connection has a proxy.
+    const res = fetchImpl ? await fetchImpl(url, init) : await fetch(url, init);
+    if (!res || !res.ok) return null;
     const data: unknown = await res.json().catch(() => null);
     const acct =
       data && typeof data === "object" ? (data as Record<string, unknown>).oauth_account : null;
@@ -360,7 +369,9 @@ export function shouldUseMidConversationSystem(
   const effectiveModel = model ?? (typeof payload.model === "string" ? payload.model : "");
 
   return (
-    hasSystem && hasTools && matchesModelPrefix(effectiveModel, MID_CONVERSATION_SYSTEM_MODEL_PREFIXES)
+    hasSystem &&
+    hasTools &&
+    matchesModelPrefix(effectiveModel, MID_CONVERSATION_SYSTEM_MODEL_PREFIXES)
   );
 }
 
@@ -401,8 +412,7 @@ export function selectBetaFlags(
   // effort-2025-11-24 must NOT imply advanced-tool-use-2025-11-20 (#9505): Claude
   // Code sends effort on every request and never sends ATU, so treating effort as
   // a proxy for ATU force-injects the heavy-agent pair the client never negotiated.
-  const allowHeavy =
-    clientBetaSet === null || clientBetaSet.has("advanced-tool-use-2025-11-20");
+  const allowHeavy = clientBetaSet === null || clientBetaSet.has("advanced-tool-use-2025-11-20");
   const hasSystem =
     !!b.system &&
     (typeof b.system === "string" || (Array.isArray(b.system) && b.system.length > 0));

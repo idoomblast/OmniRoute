@@ -51,7 +51,10 @@ export const ANTHROPIC_BETA_CLAUDE_OAUTH = [
 export const SKILLS_BETA_HEADER = "skills-2025-10-02";
 
 /** Append a beta token to an existing anthropic-beta header, deduplicating. */
-export function appendAnthropicBetaHeader(headers: Record<string, string>, betaHeader: string): void {
+export function appendAnthropicBetaHeader(
+  headers: Record<string, string>,
+  betaHeader: string
+): void {
   const existingKey = Object.keys(headers).find((key) => key.toLowerCase() === "anthropic-beta");
   if (!existingKey) {
     headers["anthropic-beta"] = betaHeader;
@@ -69,7 +72,10 @@ export function appendAnthropicBetaHeader(headers: Record<string, string>, betaH
 }
 
 /** Remove a beta token from an existing anthropic-beta header. */
-export function removeAnthropicBetaHeader(headers: Record<string, string>, betaHeader: string): void {
+export function removeAnthropicBetaHeader(
+  headers: Record<string, string>,
+  betaHeader: string
+): void {
   if (!headers || typeof headers !== "object") return;
   const existingKey = Object.keys(headers).find((key) => key.toLowerCase() === "anthropic-beta");
   if (!existingKey) return;
@@ -115,13 +121,13 @@ export function hasCodeExecutionTool(body: unknown): boolean {
   });
 }
 
-function isAnthropicFamilyProvider(provider: string | undefined | null, extraCondition: boolean): boolean {
+function isAnthropicFamilyProvider(
+  provider: string | undefined | null,
+  extraCondition: boolean
+): boolean {
   const p = typeof provider === "string" ? provider : "";
   return (
-    p === "anthropic" ||
-    p === "claude" ||
-    p.startsWith("anthropic-compatible-") ||
-    extraCondition
+    p === "anthropic" || p === "claude" || p.startsWith("anthropic-compatible-") || extraCondition
   );
 }
 

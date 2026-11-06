@@ -120,7 +120,7 @@ export async function getProviderConnections(
   filter: JsonRecord = {},
   limit?: number,
   offset?: number,
-  columns?: string[],
+  columns?: string[]
 ) {
   const useCache = !columns?.length && limit === undefined && offset === undefined;
   const raw = useCache
@@ -146,7 +146,7 @@ export async function getRawProviderConnections(
   filter: JsonRecord = {},
   limit?: number,
   offset?: number,
-  columns?: string[],
+  columns?: string[]
 ) {
   const db = getDbInstance() as unknown as DbLike;
   let selectCols = "*";
@@ -177,8 +177,6 @@ export async function getRawProviderConnections(
     conditions.push("auth_type = @authType");
     params.authType = filter.authType;
   }
-
-
 
   if (conditions.length > 0) {
     sql += " WHERE " + conditions.join(" AND ");
@@ -353,8 +351,7 @@ export async function createProviderConnection(data: JsonRecord) {
         emailMatches.find((row) => {
           const existingPsd = parseProviderSpecificData(row.provider_specific_data);
           const orgDiffers =
-            data.provider === "claude" &&
-            isOtherClaudeOrg(providerSpecificData, existingPsd);
+            data.provider === "claude" && isOtherClaudeOrg(providerSpecificData, existingPsd);
           if (orgDiffers) return false;
           const existingUsername = toStringOrNull(existingPsd?.username);
           if (incomingUsername && existingUsername) {
@@ -1005,10 +1002,7 @@ export async function getDistinctGroups(): Promise<string[]> {
   return rows.map((r) => String(r.group ?? "")).filter(Boolean);
 }
 
-export {
-  autoMigrateLegacyEncryptedConnections,
-  getGheCopilotHosts,
-} from "./providers/migrations";
+export { autoMigrateLegacyEncryptedConnections, getGheCopilotHosts } from "./providers/migrations";
 
 // ──────────────── Re-exports from leaf modules ────────────────
 

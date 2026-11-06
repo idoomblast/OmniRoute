@@ -50,6 +50,7 @@ import {
 import { getWebSessionCredentialRequirement } from "../../webSessionCredentials";
 import { useOpenRouterPresetControl } from "../OpenRouterPresetInput";
 import WebSessionCredentialGuide from "../WebSessionCredentialGuide";
+import AdvancedConnectionToggles from "./AdvancedConnectionToggles";
 import CcCompatibleRequestDefaultsFields from "./CcCompatibleRequestDefaultsFields";
 import { assignEditApiKeyProviderSpecificData } from "./connectionProviderSpecificData";
 import { isM365TierCapableProvider, normalizeM365TierValue, type M365TierValue } from "./m365Tier";
@@ -142,8 +143,7 @@ export default function EditConnectionModal({
         : false,
     passthroughModels: connectionProviderSpecificData?.passthroughModels === true,
     disableCooling: connectionProviderSpecificData?.disableCooling === true,
-    keepMidConversationSystem:
-      connectionProviderSpecificData?.keepMidConversationSystem === true,
+    keepMidConversationSystem: connectionProviderSpecificData?.keepMidConversationSystem === true,
     importFreeModelsOnly: connectionProviderSpecificData?.importFreeModelsOnly === true,
     m365Tier: normalizeM365TierValue(connectionProviderSpecificData?.tier) as M365TierValue,
   });
@@ -210,8 +210,7 @@ export default function EditConnectionModal({
   const apiKeyOptional =
     providerAllowsOptionalApiKey(provider) || Boolean(isNoAuthWebSessionCredential);
   const isCcCompatible = isClaudeCodeCompatibleProvider(provider);
-  const isPlainAnthropicCompatible =
-    isAnthropicCompatibleProvider(provider) && !isCcCompatible;
+  const isPlainAnthropicCompatible = isAnthropicCompatibleProvider(provider) && !isCcCompatible;
   const isCompatible =
     isOpenAICompatibleProvider(provider) || isAnthropicCompatibleProvider(provider);
   const apiCredentialLabel = webSessionCredential
@@ -729,40 +728,13 @@ export default function EditConnectionModal({
             {openRouterPreset.input}
           </div>
         )}
-        <div className="flex flex-col gap-4 rounded-lg border border-border/50 bg-surface/20 p-4">
-          {showFreeModelsToggle && (
-            <Toggle
-              checked={formData.importFreeModelsOnly}
-              onChange={(checked) => setFormData({ ...formData, importFreeModelsOnly: checked })}
-              label={t("importFreeModelsOnlyLabel")}
-              description={t("importFreeModelsOnlyHint")}
-            />
-          )}
-          <Toggle
-            checked={formData.disableCooling}
-            onChange={(checked) => setFormData({ ...formData, disableCooling: checked })}
-            label={t("disableCoolingLabel")}
-            description={t("disableCoolingDescription")}
-          />
-          {isPlainAnthropicCompatible && (
-            <Toggle
-              checked={formData.keepMidConversationSystem}
-              onChange={(checked) =>
-                setFormData({ ...formData, keepMidConversationSystem: checked })
-              }
-              label={providerText(
-                t,
-                "keepMidConversationSystemLabel",
-                "Keep mid-conversation system messages in place"
-              )}
-              description={providerText(
-                t,
-                "keepMidConversationSystemDescription",
-                'Leave system messages sent mid-conversation inside the message list instead of moving them into the top-level system prompt, so the prompt cache keeps hitting across turns. Enable only if this upstream accepts role "system" inside messages (otherwise it answers 400).'
-              )}
-            />
-          )}
-        </div>
+        <AdvancedConnectionToggles
+          values={formData}
+          onChange={(patch) => setFormData({ ...formData, ...patch })}
+          t={t}
+          showFreeModelsToggle={showFreeModelsToggle}
+          isPlainAnthropicCompatible={isPlainAnthropicCompatible}
+        />
         <QuotaScrapingFields
           provider={provider}
           values={formData}
