@@ -60,7 +60,10 @@ async function seedHealthyPinProvider() {
   healthySeeded = true;
 }
 
-type ComboInput = Parameters<typeof resolveComboSetupConfig>[0];
+// The fixtures below describe a COMPLETE combo (name + models + config), not the
+// config-only parameter of resolveComboSetupConfig. Deriving the type from that
+// parameter dropped name/models and produced TS2353/TS2739 at the new call sites.
+type ComboInput = import("../../open-sse/services/combo/types.ts").ComboLike;
 
 function okResponse(content: string): Response {
   const body = JSON.stringify({ choices: [{ message: { role: "assistant", content } }] });
