@@ -7,7 +7,11 @@ import { normalizeClaudeToolInputSchema, sanitizeToolId } from "../helpers/schem
 import { safeParseJSON } from "../helpers/jsonUtil.ts";
 import { applyKimiCodingThinking } from "../helpers/claudeHelper.ts";
 import { DEFAULT_THINKING_CLAUDE_SIGNATURE } from "../../config/defaultThinkingSignature.ts";
-import { isAdaptiveThinkingOnly } from "../../../src/shared/constants/modelSpecs.ts";
+import { restoreClaudeThinkingBlocks } from "../../services/claudeThinkingStore.ts";
+import {
+  getDefaultThinkingBudget,
+  isAdaptiveThinkingOnly,
+} from "../../../src/shared/constants/modelSpecs.ts";
 import { fitThinkingToMaxTokens } from "./openai-to-claude/thinkingBudget.ts";
 import { enforceToolResultAdjacency } from "./openai-to-claude/toolResultAdjacency.ts";
 import { sanitizeToolResultId } from "./openai-to-claude/sanitizeToolResultId.ts";
@@ -346,7 +350,12 @@ export function openaiToClaudeRequest(model, body, stream, credentials = null) {
         toolNameMap,
         disableToolPrefix,
         thinkingEnabledForRequest,
-        isKimiCoding
+        isKimiCoding,
+        {
+          provider: routedProvider,
+          model,
+          disabled: credentials?._videoTranscriptSensitive === true,
+        }
       );
       const hasToolUse = blocks.some((b) => b.type === "tool_use");
       const hasToolResult = blocks.some((b) => b.type === "tool_result");
@@ -575,7 +584,8 @@ function getContentBlocksFromMessage(
   toolNameMap = new Map(),
   disableToolPrefix = false,
   thinkingEnabledForRequest = false,
-  isKimiCoding = false
+  isKimiCoding = false,
+  thinkingBinding: { provider?: unknown; model?: unknown; disabled?: boolean } = {}
 ) {
   const blocks = [];
 
@@ -590,7 +600,8 @@ function getContentBlocksFromMessage(
     // A nested `cache_control` is invalid inside `tool_result.content`; hoist it
     // onto the tool_result block. Also accept a marker already hoisted onto the
     // tool MESSAGE by filterToOpenAIFormat (openai-compat passthrough path).
-    const { content: hoistedContent, cacheControl } = hoistNestedToolResultCacheControl(toolContent);
+    const { content: hoistedContent, cacheControl } =
+      hoistNestedToolResultCacheControl(toolContent);
     const toolResultCacheControl =
       msg.cache_control !== undefined ? msg.cache_control : cacheControl;
     blocks.push({
@@ -684,13 +695,15 @@ function getContentBlocksFromMessage(
           // turn introduced a `signature:""` thinking block, every subsequent Anthropic leg
           // attempt 400'd and the router silently fell back to codex forever.
           //
-          // Fix: strip thinking blocks whose signature is the empty string — that explicit
-          // empty value is the hallmark of a synthesized block from a non-Anthropic provider.
-          // Thinking blocks with `signature: undefined` (field absent) are legitimate Claude-
-          // format messages and fall through to the DEFAULT_THINKING_CLAUDE_SIGNATURE fallback
-          // as before.
-          if (part.type === "thinking" && part.signature === "") {
-            continue; // drop — synthesized by non-Anthropic provider, no valid signature
+          // Fix: strip thinking blocks that carry no signature at all. `signature: ""` is the
+          // shape codex/gpt-5.x emit; a MISSING field is what the response translator produces
+          // from cross-provider `reasoning_content` (#12105). Neither can be replayed to
+          // Anthropic, and fabricating DEFAULT_THINKING_CLAUDE_SIGNATURE is worse than dropping:
+          // prepareClaudeRequest treats any non-empty signature on the latest assistant turn as
+          // genuine and forwards the block verbatim, so the fake signature 400s upstream. This
+          // mirrors the stricter "non-empty string" check already used in claudeHelper.ts.
+          if (part.type === "thinking" && !part.signature) {
+            continue; // drop — no replayable signature (empty or absent)
           }
           if (part.type === "redacted_thinking" && part.data === "") {
             continue; // drop — same: empty data from non-Anthropic provider
@@ -758,10 +771,33 @@ function getContentBlocksFromMessage(
     // the "Pi" harness) detect the extra block and refuse the turn as prompt injection.
     // Drop reasoning_content silently when it is not required by the schema, mirroring
     // how other echo-only fields are dropped (see OPENAI_INCOMPATIBLE_ECHO_FIELDS).
-    const hasThinkingBlock = blocks.some(
+    let hasThinkingBlock = blocks.some(
       (b) => b.type === "thinking" || b.type === "redacted_thinking"
     );
     const hasToolUseBlock = blocks.some((b) => b.type === "tool_use");
+    // Signed-thinking continuity: the client (OpenAI Chat / Responses) never held the
+    // signed blocks Claude produced for this tool turn, but claude-to-openai stored them
+    // keyed by the tool_use ids. Restore them verbatim before the owning tool_use —
+    // only for the same provider + model, only when this request has thinking on and
+    // the client sent no thinking block of its own, never for a video-derived request.
+    // A miss keeps the #5312 placeholder.
+    if (
+      !isKimiCoding &&
+      !thinkingBinding.disabled &&
+      thinkingEnabledForRequest &&
+      hasToolUseBlock &&
+      !hasThinkingBlock
+    ) {
+      const restored = restoreClaudeThinkingBlocks({
+        toolUseIds: blocks.filter((b) => b.type === "tool_use").map((b) => b.id),
+        provider: thinkingBinding.provider,
+        model: thinkingBinding.model,
+      });
+      if (restored) {
+        blocks.unshift(...restored);
+        hasThinkingBlock = true;
+      }
+    }
     if (isKimiCoding && typeof msg.reasoning_content === "string" && !hasThinkingBlock) {
       blocks.unshift({ type: "thinking", thinking: msg.reasoning_content });
     } else if (

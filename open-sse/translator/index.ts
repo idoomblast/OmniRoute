@@ -306,8 +306,9 @@ export function translateRequest(
           const hasPreCompression = options?.preCompressionBody != null;
           const hasCopilot = options?.copilotClient === true;
           const hasProvider = provider != null;
+          const videoSensitive = options?.videoTranscriptSensitive === true;
           const translationCredentials =
-            hasNs || hasPreCompression || hasCopilot || hasProvider
+            hasNs || hasPreCompression || hasCopilot || hasProvider || videoSensitive
               ? {
                   ...(credentials && typeof credentials === "object" ? credentials : {}),
                   ...(hasNs ? { _signatureNamespace: options.signatureNamespace } : {}),
@@ -316,6 +317,8 @@ export function translateRequest(
                   // Routed provider id so target translators can apply provider-specific
                   // quirks (e.g. Vertex rejects function_call.id — #3440).
                   ...(hasProvider ? { _provider: provider } : {}),
+                  // Video-derived requests must not replay retained Claude signed thinking.
+                  ...(videoSensitive ? { _videoTranscriptSensitive: true } : {}),
                 }
               : credentials;
           result = fromOpenAI(model, result, stream, translationCredentials);

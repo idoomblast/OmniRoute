@@ -1,6 +1,8 @@
 import { CLAUDE_OAUTH_TOOL_PREFIX } from "../../translator/request/openai-to-claude.ts";
 
-export function buildClaudePassthroughToolNameMap(body: Record<string, unknown> | null | undefined) {
+export function buildClaudePassthroughToolNameMap(
+  body: Record<string, unknown> | null | undefined
+) {
   if (!body || !Array.isArray(body.tools)) return null;
 
   const toolNameMap = new Map<string, string>();
@@ -62,4 +64,19 @@ export function mergeResponseToolNameMap(
     merged.set(toolName, originalName);
   }
   return merged;
+}
+
+// #16475: a Responses/OpenAI client that received a tool call must see
+// finish_reason "tool_calls"; some upstream emitters leave it as "stop".
+export function normalizeOpenAIToolFinishReasons(responseBody: unknown): void {
+  const response = responseBody as {
+    choices?: Array<Record<string, unknown> & { message?: { tool_calls?: unknown[] } }>;
+  } | null;
+  if (!response?.choices) return;
+
+  for (const choice of response.choices) {
+    if (choice.message?.tool_calls?.length && choice.finish_reason !== "tool_calls") {
+      choice.finish_reason = "tool_calls";
+    }
+  }
 }

@@ -796,7 +796,7 @@ test("translateRequest does not replay reasoning-only messages for non-DeepSeek 
           {
             role: "assistant",
             content: [
-              { type: "thinking", thinking: "I already have this" },
+              { type: "thinking", thinking: "I already have this", signature: "sig_existing" },
               { type: "tool_use", id: "toolu_existing", name: "read", input: {} },
             ],
           },
@@ -825,3 +825,4 @@ test("translateRequest does not replay reasoning-only messages for non-DeepSeek 
 
     clearReasoningCacheAll();
   });
+
