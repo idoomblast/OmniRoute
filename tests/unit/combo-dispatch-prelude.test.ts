@@ -32,6 +32,8 @@ const { resolveComboSetupConfig } = await import("../../open-sse/services/comboC
 const { resolveComboRuntimeUnits } =
   await import("../../open-sse/services/combo/comboStructure.ts");
 const { recordStickyWeightedSuccess } = await import("../../open-sse/services/combo/rrState.ts");
+const { handleComboChat } = await import("../../open-sse/services/combo.ts");
+const { recordSessionModelUsage } = await import("../../src/lib/db/contextHandoffs.ts");
 const { createProviderConnection } = await import("../../src/lib/db/providers.ts");
 const { invalidateDbCache } = await import("../../src/lib/db/readCache.ts");
 const core = await import("../../src/lib/db/core.ts");
@@ -668,4 +670,98 @@ test("tryRuntimeUnitDispatch: round-robin sticky batch runs out and then rotates
   }
   assert.equal(served[0], served[1], "the sticky batch must re-serve the same unit");
   assert.notEqual(served[2], served[1], "once the batch is exhausted the rotation must move on");
+});
+
+/**
+ * B2 caller coverage: the prelude helper tests above supply sourceFormat
+ * themselves, so they cannot see a production caller dropping it. These two
+ * execute handleComboChat end-to-end and observe the Claude handoff layout the
+ * recursive child actually produced: with sourceFormat "claude" the handoff is
+ * appended to system[]; without it the same handoff falls back to a role:"system"
+ * message. Deleting either caller's `sourceFormat,` forwarding (combo.ts) fails
+ * one of these tests.
+ */
+const HANDOFF_LEAF = {
+  name: "fmt-leaf",
+  strategy: "priority",
+  models: ["p/leaf"],
+  config: { maxRetries: 0, retryDelayMs: 0 },
+};
+const HANDOFF_SESSION = "sess-format-provenance";
+const log = { info() {}, warn() {}, debug() {}, error() {} };
+
+function captureLeafBody() {
+  const seen: Record<string, unknown>[] = [];
+  const handleSingleModel = async (_body: Record<string, unknown>, modelStr: string) => {
+    if (modelStr === "p/leaf") seen.push(_body);
+    return okResponse("leaf");
+  };
+  return { seen, handleSingleModel };
+}
+
+function assertClaudeHandoffLayout(seen: Record<string, unknown>[]) {
+  assert.equal(seen.length, 1, "the leaf must be dispatched exactly once");
+  const system = seen[0].system as Array<Record<string, unknown>> | undefined;
+  assert.ok(Array.isArray(system), "Claude handoff must land in system[]");
+  assert.ok(
+    system.some((block) => String(block.text ?? "").includes("<context_handoff>")),
+    "the Claude system block must carry the handoff"
+  );
+  const messages = seen[0].messages as Array<Record<string, unknown>>;
+  assert.ok(
+    !messages.some(
+      (m) => m.role === "system" && String(m.content ?? "").includes("<context_handoff>"),
+      "Claude provenance must not fall back to a role:system message"
+    )
+  );
+}
+
+test("handleComboChat: the fusion caller forwards sourceFormat to its combo-ref child", async () => {
+  recordSessionModelUsage(HANDOFF_SESSION, HANDOFF_LEAF.name, "p/old", "p");
+  const { seen, handleSingleModel } = captureLeafBody();
+  const parent = {
+    name: "fmt-fusion-parent",
+    strategy: "fusion",
+    models: [{ kind: "combo-ref", comboName: HANDOFF_LEAF.name }],
+    config: { judgeModel: "p/judge" },
+  };
+  const res = await handleComboChat({
+    body: { model: parent.name, messages: [{ role: "user", content: "hi" }] },
+    combo: parent,
+    handleSingleModel,
+    isModelAvailable: async () => true,
+    log,
+    settings: {},
+    allCombos: [parent, HANDOFF_LEAF],
+    relayOptions: { sessionId: HANDOFF_SESSION },
+    sourceFormat: "claude",
+    signal: null,
+  });
+  assert.ok(res, "fusion parent must own the request");
+  assertClaudeHandoffLayout(seen);
+});
+
+test("handleComboChat: the runtime-unit caller forwards sourceFormat to its combo-ref child", async () => {
+  recordSessionModelUsage(HANDOFF_SESSION, HANDOFF_LEAF.name, "p/old", "p");
+  const { seen, handleSingleModel } = captureLeafBody();
+  const parent = {
+    name: "fmt-unit-parent",
+    strategy: "priority",
+    models: [{ kind: "combo-ref", comboName: HANDOFF_LEAF.name }],
+    config: { nestedComboMode: "execute" },
+  };
+  const res = await handleComboChat({
+    body: { model: parent.name, messages: [{ role: "user", content: "hi" }] },
+    combo: parent,
+    handleSingleModel,
+    isModelAvailable: async () => true,
+    log,
+    settings: {},
+    allCombos: [parent, HANDOFF_LEAF],
+    relayOptions: { sessionId: HANDOFF_SESSION },
+    sourceFormat: "claude",
+    signal: null,
+  });
+  assert.ok(res, "runtime-unit parent must own the request");
+  assertClaudeHandoffLayout(seen);
 });
