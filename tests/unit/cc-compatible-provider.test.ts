@@ -783,6 +783,7 @@ test("handleChatCore preserves client cache markers for Claude Code requests to 
   });
   assert.deepEqual(calls[0].body.messages[0].content[0].cache_control, {
     type: "ephemeral",
+    ttl: "5m",
   });
   assert.deepEqual(calls[0].body.messages[1].content[0].cache_control, {
     type: "ephemeral",
