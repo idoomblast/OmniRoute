@@ -52,7 +52,11 @@ import { useOpenRouterPresetControl } from "../OpenRouterPresetInput";
 import WebSessionCredentialGuide from "../WebSessionCredentialGuide";
 import AdvancedConnectionToggles from "./AdvancedConnectionToggles";
 import CcCompatibleRequestDefaultsFields from "./CcCompatibleRequestDefaultsFields";
-import { assignEditApiKeyProviderSpecificData } from "./connectionProviderSpecificData";
+import {
+  anthropicToggleDefaults,
+  assignAnthropicCompatibleToggles,
+  assignEditApiKeyProviderSpecificData,
+} from "./connectionProviderSpecificData";
 import { isM365TierCapableProvider, normalizeM365TierValue, type M365TierValue } from "./m365Tier";
 import ProviderTierField from "./ProviderTierField";
 import AgentrouterConsoleFields from "./AgentrouterConsoleFields";
@@ -143,8 +147,7 @@ export default function EditConnectionModal({
         : false,
     passthroughModels: connectionProviderSpecificData?.passthroughModels === true,
     disableCooling: connectionProviderSpecificData?.disableCooling === true,
-    keepMidConversationSystem: connectionProviderSpecificData?.keepMidConversationSystem === true,
-    requireUserLastMessage: connectionProviderSpecificData?.requireUserLastMessage === true,
+    ...anthropicToggleDefaults(connectionProviderSpecificData),
     importFreeModelsOnly: connectionProviderSpecificData?.importFreeModelsOnly === true,
     m365Tier: normalizeM365TierValue(connectionProviderSpecificData?.tier) as M365TierValue,
   });
@@ -170,7 +173,6 @@ export default function EditConnectionModal({
   >({});
   const [showAdvanced, setShowAdvanced] = useState(false);
   const showEmail = useEmailPrivacyStore((state) => state.emailsVisible);
-
   // #6147 — built-in providers can opt in to an advanced base-URL override.
   // OAuth connections are excluded: their save path does not persist
   // providerSpecificData.baseUrl.
@@ -337,9 +339,7 @@ export default function EditConnectionModal({
         ),
         passthroughModels: connection?.providerSpecificData?.passthroughModels === true,
         disableCooling: connection?.providerSpecificData?.disableCooling === true,
-        keepMidConversationSystem:
-          connection?.providerSpecificData?.keepMidConversationSystem === true,
-        requireUserLastMessage: connection?.providerSpecificData?.requireUserLastMessage === true,
+        ...anthropicToggleDefaults(connection?.providerSpecificData),
         importFreeModelsOnly: connection?.providerSpecificData?.importFreeModelsOnly === true,
         m365Tier: normalizeM365TierValue(connection.providerSpecificData?.tier) as M365TierValue,
       });
@@ -578,13 +578,6 @@ export default function EditConnectionModal({
         if (isClaude) {
           updates.providerSpecificData.blockExtraUsage = formData.blockExtraUsage;
         }
-        if (isPlainAnthropicCompatible) {
-          updates.providerSpecificData.keepMidConversationSystem =
-            formData.keepMidConversationSystem ? true : undefined;
-          updates.providerSpecificData.requireUserLastMessage = formData.requireUserLastMessage
-            ? true
-            : undefined;
-        }
         if (isCodex) {
           updates.providerSpecificData.requestDefaults = {
             reasoningEffort: formData.codexReasoningEffort,
@@ -599,6 +592,8 @@ export default function EditConnectionModal({
           updates.providerSpecificData.projectId = trimmedCloudCodeProjectId || null;
         }
       }
+      if (isPlainAnthropicCompatible && updates.providerSpecificData)
+        assignAnthropicCompatibleToggles(updates.providerSpecificData, formData);
       if (isAntigravityFamily) {
         updates.providerSpecificData = {
           ...(connection.providerSpecificData || {}),

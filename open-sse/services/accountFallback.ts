@@ -1,4 +1,3 @@
-import { isAssistantPrefillUnsupportedError } from "./assistantPrefillError.ts";
 import {
   BACKOFF_STEPS_MS,
   PROVIDER_PROFILES,
@@ -290,9 +289,6 @@ const MALFORMED_REQUEST_PATTERNS = [
   /\binvalid.*message.*format/i,
   /\bmessages must alternate\b/i,
   /\bempty (message|content)\b/i,
-  // Assistant prefill rejected: the body must end with a user turn (request shape).
-  /\bdoes\s+not\s+support\s+assistant\s+message\s+prefill\b/i,
-  /\bconversation\s+must\s+end\s+with\s+a\s+user\s+message\b/i,
   // Tool call function name errors
   /\bfunction'?s? name (?:can't|can not|is|has) (?:blank|empty|missing)/i,
   /function.*name.*(?:blank|empty|missing)/i,
@@ -1718,9 +1714,7 @@ export function checkFallbackError(
       p.test(errorStr)
     );
     const matchesModelAccessPattern =
-      !looksLikeAuthCredentialError &&
-      !isAssistantPrefillUnsupportedError(errorStr) &&
-      MODEL_ACCESS_DENIED_PATTERNS.some((p) => p.test(errorStr));
+      !looksLikeAuthCredentialError && MODEL_ACCESS_DENIED_PATTERNS.some((p) => p.test(errorStr));
 
     const isModelAccessDeniedStructured =
       !!structuredError &&

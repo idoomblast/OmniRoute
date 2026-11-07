@@ -2,6 +2,7 @@ import { register } from "../registry.ts";
 import { FORMATS } from "../formats.ts";
 import {
   buildGeminiThoughtSignatureKey,
+  scopeGeminiThoughtSignatureNamespace,
   storeGeminiThoughtSignature,
 } from "../../services/geminiThoughtSignatureStore.ts";
 import {
@@ -244,10 +245,13 @@ function buildToolCallId(
 }
 
 function getSignatureCacheKey(
-  state: Pick<GeminiToOpenAIState, "signatureNamespace">,
+  state: Pick<GeminiToOpenAIState, "signatureNamespace" | "model">,
   toolCallId: unknown
 ) {
-  return buildGeminiThoughtSignatureKey(state?.signatureNamespace, toolCallId);
+  return buildGeminiThoughtSignatureKey(
+    scopeGeminiThoughtSignatureNamespace(state?.signatureNamespace, state?.model),
+    toolCallId
+  );
 }
 
 function emitFunctionCallPart(

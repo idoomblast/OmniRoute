@@ -28,8 +28,17 @@ export type ClaudeSignedThinkingBlock =
   | { type: "thinking"; thinking: string; signature: string }
   | { type: "redacted_thinking"; data: string };
 
-/** The signed blocks Claude emitted between the turn's previous tool_use and `toolUseId`. */
-export type ClaudeThinkingSegment = { toolUseId: string; blocks: ClaudeSignedThinkingBlock[] };
+/**
+ * The signed blocks Claude emitted before `toolUseId`, plus each block's distance
+ * in NON-signed blocks from that tool_use. Keeping the gap lets a restore reinsert
+ * a block around intervening text instead of collapsing every block to the turn
+ * start (#18607 review).
+ */
+export type ClaudeThinkingSegment = {
+  toolUseId: string;
+  blocks: ClaudeSignedThinkingBlock[];
+  gaps?: number[];
+};
 
 type Entry = {
   provider: string;
@@ -100,6 +109,7 @@ function cloneSegments(segments: ClaudeThinkingSegment[]): ClaudeThinkingSegment
   return segments.map((segment) => ({
     toolUseId: segment.toolUseId,
     blocks: segment.blocks.map((block) => ({ ...block })),
+    ...(segment.gaps ? { gaps: [...segment.gaps] } : {}),
   }));
 }
 
@@ -139,6 +149,10 @@ function collectThinkingSegments(
 ): { segments: ClaudeThinkingSegment[]; size: number } | null {
   const segments: ClaudeThinkingSegment[] = [];
   let pending: ClaudeSignedThinkingBlock[] = [];
+  // Non-signed blocks seen since the previous signed block; recorded per signed
+  // block so a restore can put it back around intervening text.
+  let gap = 0;
+  const pendingGaps: number[] = [];
   let size = 0;
   for (const block of content) {
     const record = (block ?? {}) as Record<string, unknown>;
@@ -146,10 +160,16 @@ function collectThinkingSegments(
       const normalized = normalizeBlock(block);
       if (!normalized) return null;
       pending.push(normalized);
+      pendingGaps.push(gap);
+      gap = 0;
       size += blockSize(normalized);
     } else if (record.type === "tool_use" && typeof record.id === "string" && record.id) {
-      segments.push({ toolUseId: record.id, blocks: pending });
+      segments.push({ toolUseId: record.id, blocks: pending, gaps: [...pendingGaps] });
       pending = [];
+      pendingGaps.length = 0;
+      gap = 0;
+    } else {
+      gap++;
     }
   }
   if (size === 0 || size > MAX_CLAUDE_THINKING_ENTRY_CHARS || pending.length > 0) return null;

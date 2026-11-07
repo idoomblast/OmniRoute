@@ -148,3 +148,27 @@ export function assignEditApiKeyProviderSpecificData(options: {
     );
   }
 }
+
+/** Boolean form defaults for the (plain anthropic-compatible) prefill toggles. */
+export function anthropicToggleDefaults(psd: Record<string, unknown> | null | undefined): {
+  keepMidConversationSystem: boolean;
+  requireUserLastMessage: boolean;
+} {
+  return {
+    keepMidConversationSystem: psd?.keepMidConversationSystem === true,
+    requireUserLastMessage: psd?.requireUserLastMessage === true,
+  };
+}
+
+/**
+ * Plain anthropic-compatible connection toggles. Explicit booleans (not
+ * undefined): the PUT route merges existing providerSpecificData, so an omitted
+ * key would make switching a toggle back off impossible.
+ */
+export function assignAnthropicCompatibleToggles(
+  target: Record<string, unknown>,
+  formData: { keepMidConversationSystem?: boolean; requireUserLastMessage?: boolean }
+): void {
+  target.keepMidConversationSystem = formData.keepMidConversationSystem === true;
+  target.requireUserLastMessage = formData.requireUserLastMessage === true;
+}

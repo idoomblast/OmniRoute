@@ -57,13 +57,8 @@ import {
 import type { ProviderRequestDefaults } from "../services/providerRequestDefaults.ts";
 import { signRequestBody } from "../services/claudeCodeCCH.ts";
 import { normalizeCacheControlTtl } from "../services/claudeCodeConstraints.ts";
-import {
-  appendAnthropicBetaHeader,
-  CONTEXT_1M_BETA_HEADER,
-  finalizeClaudeBodyConstraints,
-  modelHasNativeContext1m,
-  modelSupportsContext1mBeta,
-} from "../services/claudeCodeCompatible.ts";
+import { finalizeClaudeBodyConstraints } from "../services/claudeCodeCompatible.ts";
+import { applyContext1mBetaHeader } from "./base/context1mBeta.ts";
 import { getClaudeCodeCompatibleRequestDefaults } from "@/lib/providers/requestDefaults";
 import {
   cloakThirdPartyToolNames,
@@ -74,16 +69,7 @@ import { sanitizeClaudeToolSchemas } from "../translator/helpers/schemaCoercion.
 import { sanitizeResponsesInputItems } from "../services/responsesInputSanitizer.ts";
 import { applySystemTransformPipeline, PROVIDER_CLAUDE } from "../services/systemTransforms.ts";
 import * as prl from "../utils/providerRequestLogging.ts";
-import {
-  fixToolPairs,
-  fixToolAdjacency,
-  stripTrailingAssistantOrphanToolUse,
-  stripTrailingAssistantForProvider,
-} from "../services/contextManager.ts";
-import {
-  requiresUserLastMessage,
-  stripTrailingAssistantTurns,
-} from "../services/assistantPrefill.ts";
+import { normalizeMessageTail } from "../services/messageTailNormalization.ts";
 import { randomUUID } from "node:crypto";
 import {
   getClaudeCodeVersion,
@@ -123,11 +109,8 @@ import { sanitizeReasoningEffortForProvider } from "./base/reasoningEffort.ts";
 // Reasoning-effort sanitation extracted to a pure leaf; re-exported for external
 // importers (mimoThinking service + tests) that import it from "./base.ts".
 export { sanitizeReasoningEffortForProvider } from "./base/reasoningEffort.ts";
-import { applyMaxTokensRecovery } from "./base/maxTokensRecovery.ts";
-import {
-  clampTopLevelMaxTokens,
-  getLearnedMaxTokensCap,
-} from "../services/learnedMaxTokensCaps.ts";
+import { maybeRecoverMaxTokens, preClampLearnedMaxTokens } from "./base/maxTokensRecovery.ts";
+import { recoverThinkingBudget } from "./base/thinkingBudgetRecovery.ts";
 
 /**
  * Sanitizes a custom API path to prevent path traversal attacks.
@@ -867,20 +850,13 @@ export class BaseExecutor {
         );
       }
 
-      const ccRequestDefaults = isClaudeCodeCompatible(this.provider)
-        ? getClaudeCodeCompatibleRequestDefaults(requestCredentials?.providerSpecificData)
-        : {};
-      const shouldForwardExtendedContext =
-        extendedContext &&
-        modelSupportsContext1mBeta(model) &&
-        !isClaudeCodeCompatible(this.provider);
-      const shouldForwardCcCompatibleContext1m =
-        isClaudeCodeCompatible(this.provider) &&
-        ccRequestDefaults.context1m === true &&
-        !modelHasNativeContext1m(model);
-      if (shouldForwardExtendedContext || shouldForwardCcCompatibleContext1m) {
-        appendAnthropicBetaHeader(headers, CONTEXT_1M_BETA_HEADER);
-      }
+      applyContext1mBetaHeader({
+        headers,
+        provider: this.provider,
+        model,
+        extendedContext,
+        providerSpecificData: requestCredentials?.providerSpecificData,
+      });
 
       const rawTransformedBody = await this.transformRequest(
         model,
@@ -894,15 +870,8 @@ export class BaseExecutor {
         model,
         log
       );
-      // Learned max_tokens ceiling (recorded from an earlier 400 advertising
-      // one): pre-clamp with zero extra round-trips. No-op when nothing was
-      // learned for this provider/model.
-      {
-        const learnedMaxTokensCap = getLearnedMaxTokensCap(this.provider, model);
-        if (learnedMaxTokensCap !== null) {
-          clampTopLevelMaxTokens(transformedBody, learnedMaxTokensCap);
-        }
-      }
+      // Learned max_tokens ceiling: pre-clamp with zero extra round-trips.
+      preClampLearnedMaxTokens(this.provider, model, transformedBody);
       if (this.provider === "groq") {
         transformedBody = stripGroqUnsupportedFields(
           transformedBody as Record<string, unknown>
@@ -1287,33 +1256,12 @@ export class BaseExecutor {
         {
           const tb = transformedBody as Record<string, unknown>;
           if (Array.isArray(tb?.messages)) {
-            const fixed = fixToolPairs(tb.messages as Record<string, unknown>[]);
-            // fixToolAdjacency enforces Claude's strict adjacency rule
-            // (tool_result must be in immediately next message).
-            // Only apply for Claude/Claude-compatible — OpenAI allows results
-            // spread across multiple subsequent messages.
-            const isClaude = this.provider === "claude" || isClaudeCodeCompatible(this.provider);
-            // For Claude, fixToolAdjacency may strip tool_use blocks whose
-            // tool_result isn't in the next message; re-run fixToolPairs to
-            // drop any tool_result orphaned by that strip (discussion #2410).
-            const adjacent = isClaude ? fixToolPairs(fixToolAdjacency(fixed)) : fixed;
-            const stripped = stripTrailingAssistantOrphanToolUse(adjacent);
-            // Some providers (e.g. Mistral) require the last message to be user
-            // or tool and reject trailing assistant text messages with 400 (#3396).
-            tb.messages = stripTrailingAssistantForProvider(stripped, this.provider);
-            // Per-connection opt-in for relays that ban assistant prefill.
-            if (requiresUserLastMessage(requestCredentials?.providerSpecificData)) {
-              const userLast = stripTrailingAssistantTurns(tb.messages as Record<string, unknown>[]);
-              tb.messages = userLast.messages;
-              if (userLast.removedTurns > 0 || userLast.noUserTurn) {
-                log?.info?.(
-                  "PREFILL",
-                  userLast.noUserTurn
-                    ? "requireUserLastMessage: no user turn to end on - forwarded unchanged"
-                    : `requireUserLastMessage: dropped ${userLast.removedTurns} trailing assistant turn(s)`
-                );
-              }
-            }
+            tb.messages = normalizeMessageTail({
+              messages: tb.messages as Record<string, unknown>[],
+              provider: this.provider,
+              providerSpecificData: requestCredentials?.providerSpecificData,
+              log,
+            });
           }
         }
 
@@ -1354,6 +1302,9 @@ export class BaseExecutor {
           );
         }
 
+        const ccRequestDefaults = isClaudeCodeCompatible(this.provider)
+          ? getClaudeCodeCompatibleRequestDefaults(requestCredentials?.providerSpecificData)
+          : {};
         // Explicit thinking.display="summarized" must not be blanked by redact-thinking.
         // Claude OAuth keeps its fingerprint beta unless the default-off
         // CLAUDE_OAUTH_SUMMARIZED_THINKING_UNREDACTED flag is on.
@@ -1479,58 +1430,9 @@ export class BaseExecutor {
           }
         }
 
-        // Thinking-budget 400 clamp-and-retry (Gemini-family, any provider).
-        // The proactive capThinkingBudget clamp misses models outside MODEL_SPECS,
-        // so an xhigh budget (131072) can reach the upstream and bounce with
-        // "thinking_budget must be in the range [-1, N]". When that happens: parse
-        // the advertised max, record it process-wide (so FUTURE requests clamp
-        // proactively via capThinkingBudget → getLearnedThinkingCap), clamp the
-        // nested budget in the live transformedBody, and retry the same URL once.
-        // Subsequent requests never pay this 400→retry round-trip.
-        if (
-          response.status === HTTP_STATUS.BAD_REQUEST &&
-          thinkingBudgetClampedMax === null &&
-          transformedBody &&
-          typeof transformedBody === "object"
-        ) {
-          const errText = await response
-            .clone()
-            .text()
-            .catch(() => "");
-          const upstreamMax = parseThinkingBudgetMax(errText);
-          if (upstreamMax !== null) {
-            const currentBudget = readNestedThinkingBudget(transformedBody);
-            // Record under the budget that actually failed so the learned step
-            // ladder advances correctly; fall back to upstreamMax when the body
-            // carries no readable budget (still record so we stop re-hitting).
-            recordLearnedThinkingCap(this.provider, model, currentBudget ?? upstreamMax + 1);
-            thinkingBudgetClampedMax = upstreamMax;
-            if (clampNestedThinkingBudget(transformedBody, upstreamMax)) {
-              let retryBody = JSON.stringify(transformedBody);
-              if (isClaudeCodeCompatible(this.provider) || this.provider === "claude") {
-                retryBody = await signRequestBody(retryBody);
-              }
-              log?.info?.(
-                "THINKING_BUDGET",
-                `Upstream 400 rejected thinking_budget on ${url} — clamped to ${upstreamMax} and retrying (learned for ${this.provider}/${model})`
-              );
-              response = await fetchWithStartTimeout(url, { ...fetchOptions, body: retryBody });
-            }
-          }
-        }
-
-        // max_tokens ceiling 400 clamp-and-retry: parse the upstream-advertised
-        // ceiling ("expected a value <= N"), clamp (squeezing a Claude-style
-        // thinking budget so budget_tokens < max_tokens), record it process-wide
-        // for the proactive pre-clamp above, and retry the same URL once.
-        if (
-          (response.status === HTTP_STATUS.BAD_REQUEST ||
-            response.status === HTTP_STATUS.UNPROCESSABLE_ENTITY) &&
-          !maxTokensCeilingRecovered &&
-          transformedBody &&
-          typeof transformedBody === "object"
-        ) {
-          const recovery = await applyMaxTokensRecovery({
+        // Thinking-budget 400 clamp-and-retry (helper keeps this file under cap).
+        if (thinkingBudgetClampedMax === null) {
+          const budgetFix = await recoverThinkingBudget({
             response,
             url,
             provider: this.provider,
@@ -1538,18 +1440,40 @@ export class BaseExecutor {
             body: transformedBody,
             fetchOptions,
             fetchFn: fetchWithStartTimeout,
-            serializeBody: async (retryPayload: unknown) => {
-              let serialized = JSON.stringify(retryPayload);
-              if (isClaudeCodeCompatible(this.provider) || this.provider === "claude") {
-                serialized = await signRequestBody(serialized);
-              }
-              return serialized;
-            },
+            requiresSigning: isClaudeCodeCompatible(this.provider) || this.provider === "claude",
+            signBody: signRequestBody,
+            readBudget: readNestedThinkingBudget,
+            clampBudget: clampNestedThinkingBudget,
+            recordLearnedCap: recordLearnedThinkingCap,
+            parseUpstreamMax: parseThinkingBudgetMax,
             log,
           });
-          if (recovery.attempted) maxTokensCeilingRecovered = true;
-          response = recovery.response;
-          transformedBody = recovery.body;
+          if (budgetFix) {
+            response = budgetFix.response;
+            transformedBody = budgetFix.body;
+            thinkingBudgetClampedMax = budgetFix.clampedMax;
+          }
+        }
+
+        // max_tokens ceiling 400 clamp-and-retry (helper keeps this file under cap).
+        if (!maxTokensCeilingRecovered) {
+          const recovery = await maybeRecoverMaxTokens({
+            response,
+            url,
+            provider: this.provider,
+            model,
+            body: transformedBody,
+            fetchOptions,
+            fetchFn: fetchWithStartTimeout,
+            requiresSigning: isClaudeCodeCompatible(this.provider) || this.provider === "claude",
+            signBody: signRequestBody,
+            log,
+          });
+          if (recovery) {
+            if (recovery.attempted) maxTokensCeilingRecovered = true;
+            response = recovery.response;
+            transformedBody = recovery.body;
+          }
         }
 
         // Generic reactive 400 field-downgrade; each field is stripped at most once.

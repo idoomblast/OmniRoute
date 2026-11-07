@@ -15,6 +15,7 @@ import {
   findExistingOAuthConnectionMatch,
 } from "@/lib/oauth/connectionPersistence";
 import { createDeviceFlowTicket, getDeviceFlowTicketStatus } from "@/lib/oauth/deviceFlowTickets";
+import { importTokenLockKey, keepDeviceIdentity, withImportTokenLock } from "./importTokenHelpers";
 import {
   createProviderConnection,
   updateProviderConnection,
@@ -79,19 +80,6 @@ const RETIRED_PKCE_PROVIDERS = new Set(["windsurf", "devin-cli"]);
 
 /** Providers that allow direct import of a raw API token (no OAuth exchange). */
 const IMPORT_TOKEN_PROVIDERS = new Set(["windsurf", "devin-cli", "grok-cli", "claude"]);
-
-/**
- * Re-importing a token onto an existing connection must keep its persisted
- * device identity, or the account presents to the upstream as a new device.
- */
-function keepDeviceIdentity<T extends { providerSpecificData?: Record<string, unknown> }>(
-  tokenData: T,
-  existing: { providerSpecificData?: Record<string, unknown> | null } | undefined
-): T {
-  const cliUserID = existing?.providerSpecificData?.cliUserID;
-  if (typeof cliUserID !== "string" || !tokenData.providerSpecificData) return tokenData;
-  return { ...tokenData, providerSpecificData: { ...tokenData.providerSpecificData, cliUserID } };
-}
 
 /**
  * Constant-time string comparison to prevent timing-oracle attacks (CWE-208).
@@ -844,30 +832,30 @@ export async function POST(
 
         // Tokens without an identity (e.g. a Claude setup-token) match on the token
         // itself, so re-pasting the same token updates its connection instead of
-        // duplicating it.
-        let connection: any;
-        const existing = await getProviderConnections({ provider });
-        const match = existing.find((c: any) => {
-          if (c.id && safeEqual(connectionId, c.id)) return true;
-          if (c.authType !== "oauth") return false;
-          return tokenData.email
-            ? safeEqual(c.email, tokenData.email)
-            : safeEqual(c.accessToken, tokenData.accessToken);
-        });
-        const matchId = typeof match?.id === "string" ? match.id : null;
-        if (matchId) {
-          connection = await updateProviderConnection(matchId, {
-            ...keepDeviceIdentity(tokenData, match),
-            expiresAt,
-            testStatus: "active",
-            isActive: true,
+        // duplicating it. The lock key is a hash: the raw token never sits in a map.
+        const importKey = importTokenLockKey(provider, tokenData.accessToken ?? token);
+        const connection = await withImportTokenLock(importKey, async () => {
+          const existing = await getProviderConnections({ provider });
+          const match = existing.find((c: any) => {
+            if (c.id && safeEqual(connectionId, c.id)) return true;
+            if (c.authType !== "oauth") return false;
+            return tokenData.email
+              ? safeEqual(c.email, tokenData.email)
+              : safeEqual(c.accessToken, tokenData.accessToken);
           });
-        }
-        if (!connection) {
-          connection = await createProviderConnection(
+          const matchId = typeof match?.id === "string" ? match.id : null;
+          if (matchId) {
+            return updateProviderConnection(matchId, {
+              ...keepDeviceIdentity(tokenData, match),
+              expiresAt,
+              testStatus: "active",
+              isActive: true,
+            });
+          }
+          return createProviderConnection(
             buildOAuthConnectionCreatePayload(provider, tokenData, expiresAt)
           );
-        }
+        });
 
         await syncToCloudIfEnabled();
 

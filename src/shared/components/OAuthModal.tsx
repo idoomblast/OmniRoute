@@ -11,6 +11,7 @@ import {
   OAuthManualInputPanel,
 } from "./OAuthModalPanels";
 import { parseResponseBody, getErrorMessage } from "@/shared/utils/api";
+import { pasteHint, pastePlaceholder, pasteTabLabel } from "./oauthPasteCopy";
 import { isCredentialBlob, submitCredentialBlob } from "@/shared/components/oauthBlobSubmit";
 import {
   looksLikeCodexSessionJson,
@@ -977,11 +978,7 @@ export default function OAuthModal({
               className={`text-sm px-3 py-1 rounded-t ${showPasteToken ? "font-semibold border-b-2 border-primary text-primary" : "text-text-muted"}`}
               onClick={handlePasteMode}
             >
-              {provider === "grok-cli"
-                ? "Import auth.json"
-                : provider === "claude"
-                  ? "Setup Token"
-                  : "Paste API Key"}
+              {pasteTabLabel(provider)}
             </button>
           </div>
         )}
@@ -989,15 +986,7 @@ export default function OAuthModal({
         {/* Paste-token form (Windsurf / Devin CLI) */}
         {supportsTokenPaste && showPasteToken && step !== "success" && (
           <div className="flex flex-col gap-3">
-            <p className="text-sm text-text-muted">
-              {provider === "windsurf"
-                ? 'In the Windsurf / VS Code IDE, run the "Windsurf: Provide Auth Token" command from the command palette (or click the Jupyter "Get Windsurf Authentication Token" button), then copy the shown token and paste it below. Opening windsurf.com/show-auth-token directly only shows a "Redirecting" page — the IDE must initiate the flow.'
-                : provider === "grok-cli"
-                  ? 'Paste the FULL contents of ~/.grok/auth.json (not just the JWT "key" field). A bare JWT has no refresh_token, so the connection dies after expiry (#7610). Prefer the dedicated Import auth.json modal when available.'
-                  : provider === "claude"
-                    ? "Run `claude setup-token` in a terminal, then paste the sk-ant-oat token below. It is verified with Anthropic before it is saved."
-                    : 'Provide your WINDSURF_API_KEY (obtained via `devin auth login`, or via the Windsurf IDE "Windsurf: Provide Auth Token" command).'}
-            </p>
+            <p className="text-sm text-text-muted">{pasteHint(provider)}</p>
             {provider === "grok-cli" ? (
               <textarea
                 className="w-full h-32 p-3 text-sm font-mono bg-input border border-border rounded-md resize-none focus:outline-none focus:ring-2 focus:ring-primary"
@@ -1010,7 +999,7 @@ export default function OAuthModal({
               <Input
                 value={pasteToken}
                 onChange={(e) => setPasteToken(e.target.value)}
-                placeholder={provider === "claude" ? "sk-ant-oat..." : "ws-..."}
+                placeholder={pastePlaceholder(provider)}
                 type="password"
                 label="API Key / Token"
               />

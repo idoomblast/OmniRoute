@@ -57,7 +57,7 @@ function flushThinkingContinuity(state) {
     content: indexed.sort(([left], [right]) => left - right).map(([, block]) => block),
     provider: state.provider,
     model: state.model,
-    connectionId: state.connectionId,
+    connectionId: state.connectionId ?? state.signatureNamespace,
   });
 }
 

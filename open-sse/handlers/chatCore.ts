@@ -4309,7 +4309,6 @@ export async function handleChatCore({
       comboStrategy,
       endpoint: endpointPath,
     });
-
     // Translate response to client's expected format (usually OpenAI)
     // Pass toolNameMap so Claude OAuth proxy_ prefix is stripped in tool_use blocks (#605)
     let translatedResponse = needsTranslation(responsePayloadFormat, clientResponseFormat)
@@ -4317,7 +4316,8 @@ export async function handleChatCore({
           responseBody,
           responsePayloadFormat,
           clientResponseFormat,
-          responseToolNameMap
+          responseToolNameMap,
+          { provider, model, connectionId: successConnectionId }
         )
       : responseBody;
     const memoryExtractionResponse = translatedResponse;

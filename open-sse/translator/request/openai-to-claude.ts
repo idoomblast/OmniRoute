@@ -9,7 +9,7 @@ import {
   applyKimiCodingThinking,
   createDefaultClaudeCacheControl,
 } from "../helpers/claudeHelper.ts";
-import { restoreClaudeThinkingBlocks } from "../../services/claudeThinkingStore.ts";
+import { applyAssistantThinkingContinuity } from "./openai-to-claude/thinkingContinuity.ts";
 import {
   getDefaultThinkingBudget,
   isAdaptiveThinkingOnly,
@@ -827,82 +827,16 @@ function getContentBlocksFromMessage(
       }
     }
 
-    // Add reasoning_content as a replay placeholder (OpenAI extended thinking format) —
-    // ONLY when Anthropic's schema actually requires a precursor thinking block: the
-    // outbound request has extended thinking enabled AND this assistant turn contains a
-    // tool_use block (Anthropic rejects a tool_use turn without a preceding
-    // thinking/redacted_thinking block when thinking is active). #5312 RC-D:
-    // reasoning_content carries NO real Claude signature. Emitting a `thinking` block
-    // with the fabricated DEFAULT signature makes Anthropic reject the replay with 400
-    // "Invalid signature in thinking block" — and claudeHelper's latest-assistant guard
-    // (prepareClaudeRequest) preserves it verbatim, so the fake signature leaks
-    // upstream. Emit a signature-less redacted_thinking block instead (the same shape
-    // prepareClaudeRequest produces for Anthropic-native replay, gated the same way at
-    // claudeHelper.ts `thinkingEnabled && !hasThinking && hasToolUse`); Anthropic
-    // accepts it without signature validation and non-Anthropic Claude-shape upstreams
-    // re-hydrate the real text downstream from reasoningCache.
-    // #5945: injecting this unconditionally — for ANY assistant turn carrying
-    // reasoning_content, regardless of tool_use or thinking state — fabricates a content
-    // block the client never sent. Some upstream clients (reported: Claude Sonnet 5 via
-    // the "Pi" harness) detect the extra block and refuse the turn as prompt injection.
-    // Drop reasoning_content silently when it is not required by the schema, mirroring
-    // how other echo-only fields are dropped (see OPENAI_INCOMPATIBLE_ECHO_FIELDS).
-    let hasThinkingBlock = blocks.some(
-      (b) => b.type === "thinking" || b.type === "redacted_thinking"
-    );
-    const hasToolUseBlock = blocks.some((b) => b.type === "tool_use");
-    // Signed-thinking continuity: the client (OpenAI Chat / Responses) never held the
-    // signed blocks Claude produced for this tool turn, but claude-to-openai stored them
-    // keyed by the tool_use ids. Put each run back where Claude emitted it: after the
-    // turn's previous tool_use (or at the front), before the tool_use it preceded —
-    // only for MANUAL extended thinking (`type:"enabled"`), for the same provider +
-    // model + connection, only when the client sent no thinking block of its own,
-    // never for a video-derived request. A fragment that does not carry a run's
-    // tool_use skips that run, so a turn the client split into several messages
-    // replays every block once (#18607). A miss injects nothing.
-    // #17324 recurrence (2026-10-27): adaptive-only models (Opus 4.7+/5.x, Fable 5)
-    // accept a tool_use turn with NO thinking block at all, but replaying stored
-    // signed blocks there breaks Anthropic's warm-cache block-equality whenever the
-    // restore hits/misses differently than the turn that warmed the cache (TTL,
-    // eviction, completed-turn rewrite) → 400 "latest assistant message cannot be
-    // modified".
-    const ownToolUseIds = blocks.filter((b) => b.type === "tool_use").map((b) => String(b.id));
-    // A duplicated tool_call id makes the store's entry ambiguous (it may belong to a
-    // different generation of this turn); restoring it replays a block the upstream
-    // did not see here and it answers 400 "cannot be modified". Skip instead: an
-    // assistant turn without thinking blocks is accepted.
-    const hasAmbiguousToolUseId = ownToolUseIds.some((id) =>
-      thinkingBinding.ambiguousToolUseIds?.has(id)
-    );
-    if (
-      !isKimiCoding &&
-      !thinkingBinding.disabled &&
-      thinkingEnabledForRequest &&
-      thinkingTypeForRequest === "enabled" &&
-      hasToolUseBlock &&
-      !hasThinkingBlock &&
-      !hasAmbiguousToolUseId
-    ) {
-      const restored = restoreClaudeThinkingBlocks({
-        toolUseIds: ownToolUseIds,
-        provider: thinkingBinding.provider,
-        model: thinkingBinding.model,
-        connectionId: thinkingBinding.connectionId,
-      });
-      let cursor = 0;
-      for (const { toolUseId, blocks: signed } of restored ?? []) {
-        const owner = blocks.findIndex(
-          (b, i) => i >= cursor && b.type === "tool_use" && b.id === toolUseId
-        );
-        if (owner < 0) continue;
-        blocks.splice(cursor, 0, ...signed);
-        cursor = owner + signed.length + 1;
-        hasThinkingBlock = true;
-      }
-    }
-    if (isKimiCoding && typeof msg.reasoning_content === "string" && !hasThinkingBlock) {
-      blocks.unshift({ type: "thinking", thinking: msg.reasoning_content });
-    }
+    // Signed-thinking continuity (and the legacy reasoning placeholder) live in a
+    // helper to keep this translator inside its frozen line budget.
+    applyAssistantThinkingContinuity({
+      blocks,
+      msg,
+      isKimiCoding,
+      thinkingEnabledForRequest,
+      thinkingTypeForRequest,
+      binding: thinkingBinding,
+    });
     // A store miss injects nothing: adaptive thinking has no precursor requirement, and
     // prepareClaudeRequest disables manual thinking when the final tool turn has no
     // genuine block.

@@ -8,6 +8,7 @@ import { containsTextualToolCallMarker } from "../utils/textualToolCall.ts";
 import { restoreClaudeToolName } from "../services/claudeCodeToolRemapper.ts";
 import { sanitizeToolId } from "../translator/helpers/schemaCoercion.ts";
 import { getAnyReasoningValue } from "../utils/reasoningFields.ts";
+import { storeClaudeThinkingFromResponse } from "../services/claudeThinkingStore.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -135,8 +136,16 @@ export function translateNonStreamingResponse(
   responseBody: unknown,
   targetFormat: string,
   sourceFormat: string,
-  toolNameMap?: Map<string, string> | null
+  toolNameMap?: Map<string, string> | null,
+  claudeThinking?: { provider: string; model: string; connectionId?: string | null }
 ): unknown {
+  // Claude signed-thinking continuity (#17324): a non-Claude client never sees
+  // the signed blocks of this turn, so keep them server-side for the next one.
+  if (targetFormat === FORMATS.CLAUDE && sourceFormat !== FORMATS.CLAUDE) {
+    try {
+      if (claudeThinking) storeClaudeThinkingFromResponse(responseBody, claudeThinking);
+    } catch {}
+  }
   // If already in source format, return as-is
   if (targetFormat === sourceFormat) {
     return responseBody;

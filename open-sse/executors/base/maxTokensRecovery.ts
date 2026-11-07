@@ -10,6 +10,7 @@
 import { HTTP_STATUS } from "../../config/constants.ts";
 import {
   clampTopLevelMaxTokens,
+  getLearnedMaxTokensCap,
   parseMaxTokensCeiling,
   recordLearnedMaxTokensCap,
 } from "../../services/learnedMaxTokensCaps.ts";
@@ -36,6 +37,19 @@ export interface MaxTokensRecoveryParams {
   log?: RecoveryLog;
 }
 
+/**
+ * Proactive clamp from a ceiling learned on an earlier 400. No-op when nothing
+ * has been learned for this provider/model.
+ */
+export function preClampLearnedMaxTokens(
+  provider: string,
+  model: string | undefined,
+  body: unknown
+): void {
+  const cap = getLearnedMaxTokensCap(provider, model);
+  if (cap !== null) clampTopLevelMaxTokens(body, cap);
+}
+
 export interface MaxTokensRecoveryResult {
   /** The response to use going forward — the retry's response when a retry happened. */
   response: Response;
@@ -57,6 +71,47 @@ export interface MaxTokensRecoveryResult {
  * same URL once. Returns the original response/body unchanged
  * (retried: false) when the response isn't a recoverable max_tokens rejection.
  */
+/**
+ * Caller-side wrapper: skips non-400/422 responses and bodies that are not
+ * objects, and signs the retry body when the provider requires request signing.
+ * Returns null when the response is not a max_tokens rejection at all.
+ */
+export async function maybeRecoverMaxTokens(args: {
+  response: Response;
+  url: string;
+  provider: string;
+  model: string | undefined;
+  body: unknown;
+  fetchOptions: RequestInit;
+  fetchFn: (url: string, options: RequestInit) => Promise<Response>;
+  requiresSigning: boolean;
+  signBody: (body: string) => Promise<string>;
+  log?: RecoveryLog;
+}): Promise<MaxTokensRecoveryResult | null> {
+  if (
+    (args.response.status !== HTTP_STATUS.BAD_REQUEST &&
+      args.response.status !== HTTP_STATUS.UNPROCESSABLE_ENTITY) ||
+    !args.body ||
+    typeof args.body !== "object"
+  ) {
+    return null;
+  }
+  return applyMaxTokensRecovery({
+    response: args.response,
+    url: args.url,
+    provider: args.provider,
+    model: args.model,
+    body: args.body,
+    fetchOptions: args.fetchOptions,
+    fetchFn: args.fetchFn,
+    serializeBody: async (retryPayload: unknown) => {
+      const serialized = JSON.stringify(retryPayload);
+      return args.requiresSigning ? args.signBody(serialized) : serialized;
+    },
+    log: args.log,
+  });
+}
+
 export async function applyMaxTokensRecovery(
   params: MaxTokensRecoveryParams
 ): Promise<MaxTokensRecoveryResult> {
@@ -90,7 +145,7 @@ export async function applyMaxTokensRecovery(
     // rejected — surface the original response rather than masking it.
     log?.info?.(
       "MAX_TOKENS",
-      `Upstream ${response.status} advertised a max_tokens ceiling of ${learned} on ${url} — body already within it, not retrying (${provider}/${model})`
+      `Upstream ${response.status} advertised a max_tokens ceiling of ${learned} - body already within it, not retrying (${provider}/${model})`
     );
     return { response, body, retried: false, attempted: true };
   }
@@ -99,7 +154,7 @@ export async function applyMaxTokensRecovery(
   const retryBody = await serialize(body);
   log?.info?.(
     "MAX_TOKENS",
-    `Upstream ${response.status} rejected max_tokens on ${url} — clamped to ${learned} and retrying (learned for ${provider}/${model})`
+    `Upstream ${response.status} rejected max_tokens - clamped to ${learned} and retrying (learned for ${provider}/${model})`
   );
   const retriedResponse = await fetchFn(url, { ...fetchOptions, body: retryBody });
   return { response: retriedResponse, body, retried: true, attempted: true };

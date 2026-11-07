@@ -503,6 +503,20 @@ function getMaxTokenCapabilityOverride(resolved: {
   );
 }
 
+/** Operator-set `max_input_tokens` override, resolved like the output override. */
+function getMaxInputTokenCapabilityOverride(resolved: {
+  provider: string | null;
+  model: string | null;
+  rawModel: string | null;
+}): number | null {
+  const lookup = (model: string | null) =>
+    model ? getModelCapabilityOverride(resolved.provider, model, "max_input_tokens") : null;
+  return (
+    lookup(resolved.model) ??
+    (resolved.rawModel && resolved.rawModel !== resolved.model ? lookup(resolved.rawModel) : null)
+  );
+}
+
 export function getExplicitModelOutputCap(input: CapabilityInput): number | null {
   const resolved = resolveCapabilityInput(input);
   const maxTokenOverride = getMaxTokenCapabilityOverride(resolved);
@@ -581,6 +595,7 @@ export function getResolvedModelCapabilities(input: CapabilityInput): ResolvedMo
     null;
 
   const maxTokenOverride = getMaxTokenCapabilityOverride(resolved);
+  const maxInputTokenOverride = getMaxInputTokenCapabilityOverride(resolved);
 
   // Vision consults leaf static metadata for path-shaped ids; other capability
   // fields keep using the non-leaf `spec` from getStaticSpec() above.
@@ -617,6 +632,7 @@ export function getResolvedModelCapabilities(input: CapabilityInput): ResolvedMo
     temperature: synced?.temperature ?? null,
     contextWindow,
     maxInputTokens:
+      maxInputTokenOverride ??
       (typeof registryModel?.maxInputTokens === "number" ? registryModel.maxInputTokens : null) ??
       authoritativeContextWindow ??
       synced?.limit_input ??

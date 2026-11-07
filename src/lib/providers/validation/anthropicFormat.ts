@@ -151,8 +151,13 @@ export async function validateClaudeOAuthInline({
     if (response.status === 401 || response.status === 403) {
       return { valid: false, error: "Invalid OAuth token" };
     }
-    if (response.status >= 500) {
-      return { valid: false, error: `Provider unavailable (${response.status})` };
+    if (response.status === 429) {
+      // Rate limiting is inconclusive, not proof the token works.
+      return { valid: false, error: "Provider rate-limited the verification (429) - try again" };
+    }
+    if (!response.ok) {
+      // Fail closed: only a successful one-token inference proves the token works.
+      return { valid: false, error: `Provider rejected the token (${response.status})` };
     }
     return { valid: true, error: null };
   } catch (error: any) {
