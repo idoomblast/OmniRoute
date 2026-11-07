@@ -34,6 +34,7 @@ interface QuotaCardProps {
         quotas?: any[];
         plan?: string | null;
         message?: string | null;
+        raw?: { bankedResetCredits?: number; [key: string]: unknown } | null;
         stale?: { since?: string; reason?: string } | null;
       }
     | undefined;
@@ -113,7 +114,10 @@ export default function QuotaCard({
   const hasStaleData = !!quota?.stale;
   const displayRefreshedAt = quota?.stale?.since || refreshedAt;
   const canEditCutoff = computeCanEditCutoff(quotas);
-  const canRedeemResetCredit = computeCanRedeemResetCredit(connection.provider, quotas);
+  const canRedeemResetCredit = computeCanRedeemResetCredit(connection.provider, quotas, {
+    raw: quota?.raw,
+    authType: connection.authType,
+  });
 
   return (
     <Card

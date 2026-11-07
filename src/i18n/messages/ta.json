@@ -5411,6 +5411,10 @@
     "grokWebCookieHint": "Grok Web Cookie Hint",
     "blockClaudeExtraUsageDescription": "__MISSING__:When enabled, OmniRoute marks this Claude connection unavailable as soon as the usage API reports queued extra usage, so fallback switches to another connection instead of continuing on pay-as-you-go extra billing.",
     "blockClaudeExtraUsageLabel": "__MISSING__:Block extra Claude usage",
+    "claudeLowPriorityModeLabel": "Continue at lower priority after the 5-hour limit",
+    "claudeLowPriorityModeDescription": "When this account hits its 5-hour usage limit and Anthropic offers the lower-priority lane, OmniRoute accepts it and keeps sending requests with anthropic-usage-limit: slow until the window resets, instead of cooling the connection down. The weekly limit still applies and responses may wait for spare capacity.",
+    "claudeAutoLimitResetLabel": "Auto-reset the session limit (once a week)",
+    "claudeAutoLimitResetDescription": "When this account hits its 5-hour usage limit and a session-limit reset is available, OmniRoute claims it automatically and retries at full speed. Uses the account's once-a-week reset and still counts toward the weekly limit.",
     "disableCoolingDescription": "தற்காலிக கூல்டவுனைத் தவிர்க்கவும், இதனால் மீட்டெடுக்கக்கூடிய பிழைகளுக்குப் பிறகும் இந்த இணைப்பு தகுதியுடையதாக இருக்கும் (தடைசெய்யப்பட்ட/காலாவதியான போன்ற இறுதி நிலைகள் இன்னும் பொருந்தும்).",
     "disableCoolingLabel": "இந்த இணைப்பிற்கான கூல்டவுனை முடக்கவும்",
     "bulkPasteAdded": "{count, plural, one {1 key added} other {# keys added}}",
@@ -8851,7 +8855,11 @@
     "updatedShort": "புதுப்பிக்கப்பட்டது",
     "lastRefreshed": "கடைசியாகப் புதுப்பிக்கப்பட்டது",
     "providerQuota": "வழங்குநர் ஒதுக்கீடு",
-    "providerQuotaHomeHint": "இணைக்கப்பட்ட கணக்குகளின் நேரலை நிலை"
+    "providerQuotaHomeHint": "இணைக்கப்பட்ட கணக்குகளின் நேரலை நிலை",
+    "claudeResetCreditDefaultTitle": "Claude வரம்பு மீட்டமைப்பு",
+    "confirmRedeemClaudeResetCredit": "மீட்பதன் மூலம் தகுதியுள்ள Claude பயன்பாட்டு வரம்புகள் உடனடியாக மீட்டமைக்கப்படும் மற்றும் இந்தக் கிரெடிட் நிரந்தரமாகப் பயன்படுத்தப்படும்.",
+    "claudeResetCreditsModalTitle": "Claude மீட்டமைப்பு கிரெடிட்கள்",
+    "claudeResetCreditsModalExplainer": "இந்தக் கணக்கிற்குக் கிடைக்கும் Claude மீட்டமைப்பு கிரெடிட்கள் மற்றும் வாராந்திர அமர்வு மீட்டமைப்புகள்."
   },
   "modals": {
     "waitingAuth": "Waiting for Authorization",

@@ -5411,6 +5411,10 @@
     "grokWebCookieHint": "從 Grok Web 會話複製 Cookie。",
     "blockClaudeExtraUsageDescription": "啟用後，一旦用量 API 回報排隊中的額外用量，OmniRoute 會將此 Claude 連線標記為不可用，讓容錯移轉切換到其他連線，而非繼續以按量計費的額外用量。",
     "blockClaudeExtraUsageLabel": "封鎖額外 Claude 用量",
+    "claudeLowPriorityModeLabel": "Continue at lower priority after the 5-hour limit",
+    "claudeLowPriorityModeDescription": "When this account hits its 5-hour usage limit and Anthropic offers the lower-priority lane, OmniRoute accepts it and keeps sending requests with anthropic-usage-limit: slow until the window resets, instead of cooling the connection down. The weekly limit still applies and responses may wait for spare capacity.",
+    "claudeAutoLimitResetLabel": "Auto-reset the session limit (once a week)",
+    "claudeAutoLimitResetDescription": "When this account hits its 5-hour usage limit and a session-limit reset is available, OmniRoute claims it automatically and retries at full speed. Uses the account's once-a-week reset and still counts toward the weekly limit.",
     "disableCoolingDescription": "跳過暫時冷卻，使此連線在可恢復錯誤後仍保持資格（已停用/已過期等終止狀態仍適用）。",
     "disableCoolingLabel": "對此連線停用冷卻",
     "bulkPasteAdded": "{count, plural, one {已新增 1 個 key} other {已新增 # 個 key}}",
@@ -8851,7 +8855,11 @@
     "updatedShort": "更新於",
     "lastRefreshed": "上次重新整理",
     "providerQuota": "提供者配額",
-    "providerQuotaHomeHint": "已連線帳戶的即時狀態"
+    "providerQuotaHomeHint": "已連線帳戶的即時狀態",
+    "claudeResetCreditDefaultTitle": "Claude 限額重設",
+    "confirmRedeemClaudeResetCredit": "兌換將立即重設符合條件的 Claude 使用限額，並永久消耗此點數。",
+    "claudeResetCreditsModalTitle": "Claude 重設點數",
+    "claudeResetCreditsModalExplainer": "此帳戶可用的 Claude 重設點數與每週工作階段重設次數。"
   },
   "modals": {
     "waitingAuth": "等待授權",

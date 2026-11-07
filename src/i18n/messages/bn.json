@@ -5411,6 +5411,10 @@
     "grokWebCookieHint": "Grok Web Cookie Hint",
     "blockClaudeExtraUsageDescription": "__MISSING__:When enabled, OmniRoute marks this Claude connection unavailable as soon as the usage API reports queued extra usage, so fallback switches to another connection instead of continuing on pay-as-you-go extra billing.",
     "blockClaudeExtraUsageLabel": "__MISSING__:Block extra Claude usage",
+    "claudeLowPriorityModeLabel": "Continue at lower priority after the 5-hour limit",
+    "claudeLowPriorityModeDescription": "When this account hits its 5-hour usage limit and Anthropic offers the lower-priority lane, OmniRoute accepts it and keeps sending requests with anthropic-usage-limit: slow until the window resets, instead of cooling the connection down. The weekly limit still applies and responses may wait for spare capacity.",
+    "claudeAutoLimitResetLabel": "Auto-reset the session limit (once a week)",
+    "claudeAutoLimitResetDescription": "When this account hits its 5-hour usage limit and a session-limit reset is available, OmniRoute claims it automatically and retries at full speed. Uses the account's once-a-week reset and still counts toward the weekly limit.",
     "disableCoolingDescription": "অস্থায়ী কুলডাউন এড়িয়ে যান যাতে পুনরুদ্ধারযোগ্য ত্রুটির পরেও এই সংযোগটি যোগ্য থাকে (নিষিদ্ধ/মেয়াদোত্তীর্ণের মতো টার্মিনাল অবস্থাগুলি এখনও প্রযোজ্য)।",
     "disableCoolingLabel": "এই সংযোগের জন্য কুলডাউন নিষ্ক্রিয় করুন",
     "bulkPasteAdded": "{count, plural, one {1 key added} other {# keys added}}",
@@ -8851,7 +8855,11 @@
     "updatedShort": "আপডেট করা হয়েছে",
     "lastRefreshed": "সর্বশেষ রিফ্রেশ করা হয়েছে",
     "providerQuota": "প্রোভাইডার কোটা",
-    "providerQuotaHomeHint": "সংযুক্ত অ্যাকাউন্টগুলোর লাইভ স্ট্যাটাস"
+    "providerQuotaHomeHint": "সংযুক্ত অ্যাকাউন্টগুলোর লাইভ স্ট্যাটাস",
+    "claudeResetCreditDefaultTitle": "Claude সীমা রিসেট",
+    "confirmRedeemClaudeResetCredit": "রিডিম করার সাথে সাথে উপযুক্ত Claude ব্যবহারের সীমা রিসেট হয়ে যায় এবং এই ক্রেডিটটি স্থায়ীভাবে ব্যবহৃত হয়।",
+    "claudeResetCreditsModalTitle": "Claude রিসেট ক্রেডিট",
+    "claudeResetCreditsModalExplainer": "এই অ্যাকাউন্টের জন্য উপলব্ধ Claude রিসেট ক্রেডিট এবং সাপ্তাহিক সেশন রিসেট।"
   },
   "modals": {
     "waitingAuth": "Waiting for Authorization",

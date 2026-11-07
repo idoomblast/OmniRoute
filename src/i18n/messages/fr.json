@@ -5411,6 +5411,10 @@
     "grokWebCookieHint": "Grok Web Cookie Hint",
     "blockClaudeExtraUsageDescription": "__MISSING__:When enabled, OmniRoute marks this Claude connection unavailable as soon as the usage API reports queued extra usage, so fallback switches to another connection instead of continuing on pay-as-you-go extra billing.",
     "blockClaudeExtraUsageLabel": "__MISSING__:Block extra Claude usage",
+    "claudeLowPriorityModeLabel": "Continue at lower priority after the 5-hour limit",
+    "claudeLowPriorityModeDescription": "When this account hits its 5-hour usage limit and Anthropic offers the lower-priority lane, OmniRoute accepts it and keeps sending requests with anthropic-usage-limit: slow until the window resets, instead of cooling the connection down. The weekly limit still applies and responses may wait for spare capacity.",
+    "claudeAutoLimitResetLabel": "Auto-reset the session limit (once a week)",
+    "claudeAutoLimitResetDescription": "When this account hits its 5-hour usage limit and a session-limit reset is available, OmniRoute claims it automatically and retries at full speed. Uses the account's once-a-week reset and still counts toward the weekly limit.",
     "disableCoolingDescription": "Ignorer le délai de récupération temporaire pour que cette connexion reste éligible même après des erreurs récupérables (les états terminaux comme banni/expiré s'appliquent toujours).",
     "disableCoolingLabel": "Désactiver le délai de récupération pour cette connexion",
     "bulkPasteAdded": "{count, plural, one {1 key added} other {# keys added}}",
@@ -8851,7 +8855,11 @@
     "updatedShort": "Mis à jour",
     "lastRefreshed": "Dernière actualisation",
     "providerQuota": "Quota du fournisseur",
-    "providerQuotaHomeHint": "Statut en direct sur les comptes connectés"
+    "providerQuotaHomeHint": "Statut en direct sur les comptes connectés",
+    "claudeResetCreditDefaultTitle": "Réinitialisation des limites Claude",
+    "confirmRedeemClaudeResetCredit": "L'utilisation réinitialise immédiatement les limites d'utilisation Claude éligibles et consomme définitivement ce crédit.",
+    "claudeResetCreditsModalTitle": "Crédits de réinitialisation Claude",
+    "claudeResetCreditsModalExplainer": "Crédits de réinitialisation Claude disponibles et réinitialisations de session hebdomadaires pour ce compte."
   },
   "modals": {
     "waitingAuth": "En attente d'autorisation",

@@ -5411,6 +5411,10 @@
     "grokWebCookieHint": "Grok Web Cookie Hint",
     "blockClaudeExtraUsageDescription": "__MISSING__:When enabled, OmniRoute marks this Claude connection unavailable as soon as the usage API reports queued extra usage, so fallback switches to another connection instead of continuing on pay-as-you-go extra billing.",
     "blockClaudeExtraUsageLabel": "__MISSING__:Block extra Claude usage",
+    "claudeLowPriorityModeLabel": "Continue at lower priority after the 5-hour limit",
+    "claudeLowPriorityModeDescription": "When this account hits its 5-hour usage limit and Anthropic offers the lower-priority lane, OmniRoute accepts it and keeps sending requests with anthropic-usage-limit: slow until the window resets, instead of cooling the connection down. The weekly limit still applies and responses may wait for spare capacity.",
+    "claudeAutoLimitResetLabel": "Auto-reset the session limit (once a week)",
+    "claudeAutoLimitResetDescription": "When this account hits its 5-hour usage limit and a session-limit reset is available, OmniRoute claims it automatically and retries at full speed. Uses the account's once-a-week reset and still counts toward the weekly limit.",
     "disableCoolingDescription": "Laktawan ang transient cooldown para manatiling kwalipikado ang koneksyong ito kahit pagkatapos ng mga error na maaaring ma-recover (nalalapat pa rin ang mga terminal state tulad ng banned/expired).",
     "disableCoolingLabel": "I-disable ang cooldown para sa koneksyong ito",
     "bulkPasteAdded": "{count, plural, one {1 key added} other {# keys added}}",
@@ -8851,7 +8855,11 @@
     "updatedShort": "Na-update",
     "lastRefreshed": "Huling na-refresh",
     "providerQuota": "Quota ng Provider",
-    "providerQuotaHomeHint": "Live na status sa lahat ng nakakonektang account"
+    "providerQuotaHomeHint": "Live na status sa lahat ng nakakonektang account",
+    "claudeResetCreditDefaultTitle": "Pag-reset ng limit ng Claude",
+    "confirmRedeemClaudeResetCredit": "Ang pag-redeem ay agad na nagre-reset ng mga kwalipikadong limitasyon sa paggamit ng Claude at permanenteng gagamitin ang credit na ito.",
+    "claudeResetCreditsModalTitle": "Mga credit sa pag-reset ng Claude",
+    "claudeResetCreditsModalExplainer": "Mga available na credit sa pag-reset ng Claude at lingguhang pag-reset ng session para sa account na ito."
   },
   "modals": {
     "waitingAuth": "Naghihintay ng Awtorisasyon",

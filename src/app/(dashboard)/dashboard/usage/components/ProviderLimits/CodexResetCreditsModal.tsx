@@ -11,6 +11,7 @@ import type { CodexResetCreditView } from "./useCodexResetCreditRedemption";
 interface Props {
   credits: CodexResetCreditView[];
   availableCount: number;
+  provider?: string;
   isOpen: boolean;
   loading: boolean;
   onClose: () => void;
@@ -78,11 +79,41 @@ function ResetCreditModalFooter({
   );
 }
 
+export function getResetCreditWindowTitle(
+  provider: string,
+  credit: CodexResetCreditView,
+  tr: (key: string, fallback: string, values?: UsageTranslationValues) => string
+): string {
+  if (provider === "claude") {
+    return credit.title || tr("claudeResetCreditDefaultTitle", "Claude limit reset");
+  }
+  return credit.title || tr("resetCreditDefaultTitle", "Full reset");
+}
+
+export function getResetCreditConfirmation(
+  provider: string,
+  _resetType: string | undefined,
+  tr: (key: string, fallback: string, values?: UsageTranslationValues) => string
+): string {
+  if (provider === "claude") {
+    return tr(
+      "confirmRedeemClaudeResetCredit",
+      "Redeeming immediately resets the eligible Claude usage limits and permanently consumes this credit."
+    );
+  }
+  return tr(
+    "confirmRedeemResetCredit",
+    "Redeeming immediately resets the eligible Codex usage windows and permanently consumes this credit."
+  );
+}
+
 function ResetCreditConfirmation({
   credit,
+  provider,
   tr,
 }: {
   credit: CodexResetCreditView;
+  provider: string;
   tr: (key: string, fallback: string, values?: UsageTranslationValues) => string;
 }) {
   return (
@@ -95,10 +126,7 @@ function ResetCreditConfirmation({
               {tr("confirmRedeemResetCreditTitle", "Redeem this reset credit?")}
             </p>
             <p className="mt-1 text-sm text-text-muted">
-              {tr(
-                "confirmRedeemResetCredit",
-                "Redeeming immediately resets the eligible Codex usage windows and permanently consumes this credit."
-              )}
+              {getResetCreditConfirmation(provider, credit.resetType, tr)}
             </p>
           </div>
         </div>
@@ -159,6 +187,7 @@ function ResetCreditList({
 export default function CodexResetCreditsModal({
   credits,
   availableCount,
+  provider,
   isOpen,
   loading,
   onClose,
@@ -196,7 +225,11 @@ export default function CodexResetCreditsModal({
     <Modal
       isOpen={isOpen}
       onClose={close}
-      title={tr("resetCreditsModalTitle", "Codex reset credits")}
+      title={
+        provider === "claude"
+          ? tr("claudeResetCreditsModalTitle", "Claude reset credits")
+          : tr("resetCreditsModalTitle", "Codex reset credits")
+      }
       size="lg"
       closeOnOverlay={!loading}
       footer={
@@ -211,14 +244,19 @@ export default function CodexResetCreditsModal({
       }
     >
       {confirming && selectedCredit ? (
-        <ResetCreditConfirmation credit={selectedCredit} tr={tr} />
+        <ResetCreditConfirmation credit={selectedCredit} provider={provider ?? "codex"} tr={tr} />
       ) : (
         <div className="space-y-4">
           <p className="text-sm text-text-muted">
-            {tr(
-              "resetCreditsModalExplainer",
-              "Credits are ordered by expiration. Automatic redemption always uses the credit that expires first."
-            )}
+            {provider === "claude"
+              ? tr(
+                  "claudeResetCreditsModalExplainer",
+                  "Available Claude reset credits and weekly session resets for this account."
+                )
+              : tr(
+                  "resetCreditsModalExplainer",
+                  "Credits are ordered by expiration. Automatic redemption always uses the credit that expires first."
+                )}
           </p>
           <ResetCreditList
             availableCount={availableCount}

@@ -5433,6 +5433,10 @@
     "grokWebCookieHint": "Gợi ý Grok Web Cookie",
     "blockClaudeExtraUsageDescription": "Khi được bật, OmniRoute sẽ đánh dấu kết nối Claude này là không khả dụng ngay khi API mức sử dụng báo cáo mức sử dụng bổ sung đang xếp hàng, để chuyển dự phòng sang kết nối khác thay vì tiếp tục tính phí bổ sung theo mức sử dụng.",
     "blockClaudeExtraUsageLabel": "Chặn mức sử dụng Claude bổ sung",
+    "claudeLowPriorityModeLabel": "Continue at lower priority after the 5-hour limit",
+    "claudeLowPriorityModeDescription": "When this account hits its 5-hour usage limit and Anthropic offers the lower-priority lane, OmniRoute accepts it and keeps sending requests with anthropic-usage-limit: slow until the window resets, instead of cooling the connection down. The weekly limit still applies and responses may wait for spare capacity.",
+    "claudeAutoLimitResetLabel": "Auto-reset the session limit (once a week)",
+    "claudeAutoLimitResetDescription": "When this account hits its 5-hour usage limit and a session-limit reset is available, OmniRoute claims it automatically and retries at full speed. Uses the account's once-a-week reset and still counts toward the weekly limit.",
     "disableCoolingDescription": "Bỏ qua thời gian chờ tạm thời để kết nối này vẫn đủ điều kiện hoạt động ngay cả sau các lỗi có thể khôi phục (các trạng thái cuối cùng như bị cấm hoặc hết hạn vẫn áp dụng).",
     "disableCoolingLabel": "Vô hiệu hóa thời gian chờ cho kết nối này",
     "bulkPasteAdded": "{count, plural, one {Đã thêm 1 khóa} other {Đã thêm # khóa}}",
@@ -8876,7 +8880,11 @@
     "updatedShort": "Đã cập nhật",
     "lastRefreshed": "Cập nhật lần cuối",
     "providerQuota": "Hạn ngạch nhà cung cấp",
-    "providerQuotaHomeHint": "Trạng thái theo thời gian thực của các tài khoản đã kết nối"
+    "providerQuotaHomeHint": "Trạng thái theo thời gian thực của các tài khoản đã kết nối",
+    "claudeResetCreditDefaultTitle": "Đặt lại giới hạn Claude",
+    "confirmRedeemClaudeResetCredit": "Việc quy đổi sẽ ngay lập tức đặt lại các giới hạn sử dụng Claude đủ điều kiện và tiêu hao vĩnh viễn khoản tín dụng này.",
+    "claudeResetCreditsModalTitle": "Tín dụng đặt lại Claude",
+    "claudeResetCreditsModalExplainer": "Tín dụng đặt lại Claude khả dụng và lượt đặt lại phiên hàng tuần cho tài khoản này."
   },
   "modals": {
     "waitingAuth": "Đang chờ ủy quyền",

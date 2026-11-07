@@ -5411,6 +5411,10 @@
     "grokWebCookieHint": "Grok Web Cookie Hint",
     "blockClaudeExtraUsageDescription": "__MISSING__:When enabled, OmniRoute marks this Claude connection unavailable as soon as the usage API reports queued extra usage, so fallback switches to another connection instead of continuing on pay-as-you-go extra billing.",
     "blockClaudeExtraUsageLabel": "__MISSING__:Block extra Claude usage",
+    "claudeLowPriorityModeLabel": "Continue at lower priority after the 5-hour limit",
+    "claudeLowPriorityModeDescription": "When this account hits its 5-hour usage limit and Anthropic offers the lower-priority lane, OmniRoute accepts it and keeps sending requests with anthropic-usage-limit: slow until the window resets, instead of cooling the connection down. The weekly limit still applies and responses may wait for spare capacity.",
+    "claudeAutoLimitResetLabel": "Auto-reset the session limit (once a week)",
+    "claudeAutoLimitResetDescription": "When this account hits its 5-hour usage limit and a session-limit reset is available, OmniRoute claims it automatically and retries at full speed. Uses the account's once-a-week reset and still counts toward the weekly limit.",
     "disableCoolingDescription": "Omite perioada de răcire tranzitorie, astfel încât această conexiune să rămână eligibilă chiar și după erori recuperabile (stările terminale precum blocat/expirat se aplică în continuare).",
     "disableCoolingLabel": "Dezactivează perioada de răcire pentru această conexiune",
     "bulkPasteAdded": "{count, plural, one {1 key added} other {# keys added}}",
@@ -8851,7 +8855,11 @@
     "updatedShort": "Actualizat",
     "lastRefreshed": "Ultima reîmprospătare",
     "providerQuota": "Cotă furnizor",
-    "providerQuotaHomeHint": "Stare în timp real pentru conturile conectate"
+    "providerQuotaHomeHint": "Stare în timp real pentru conturile conectate",
+    "claudeResetCreditDefaultTitle": "Resetare limită Claude",
+    "confirmRedeemClaudeResetCredit": "Revendicarea resetează imediat limitele de utilizare Claude eligibile și consumă definitiv acest credit.",
+    "claudeResetCreditsModalTitle": "Credite de resetare Claude",
+    "claudeResetCreditsModalExplainer": "Credite de resetare Claude disponibile și resetări săptămânale ale sesiunilor pentru acest cont."
   },
   "modals": {
     "waitingAuth": "În așteptarea autorizației",

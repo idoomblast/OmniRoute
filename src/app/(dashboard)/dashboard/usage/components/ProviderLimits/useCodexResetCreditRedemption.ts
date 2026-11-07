@@ -29,6 +29,40 @@ type SetErrors = React.Dispatch<React.SetStateAction<Record<string, string | nul
 type SetQuotaData = React.Dispatch<React.SetStateAction<Record<string, any>>>;
 type SetLastRefreshedAt = React.Dispatch<React.SetStateAction<Record<string, string>>>;
 
+/**
+ * The upstream redemption already committed but the post-commit quota refresh failed: keep the
+ * existing windows and only decrement the consumed reset-credit count so success is not
+ * reported as failure.
+ */
+export function applyCommittedResetCreditFallback(entry: any): any {
+  if (!entry) return entry;
+  const quotas = Array.isArray(entry.quotas)
+    ? entry.quotas.flatMap((quota: any) => {
+        if (!quota?.isResetCredits) return [quota];
+        const count = Math.max(0, Number(quota.creditCount ?? quota.remaining ?? 0) - 1);
+        return count > 0 ? [{ ...quota, creditCount: count, remaining: count }] : [];
+      })
+    : entry.quotas;
+  // An unknown count (Claude before any list) stays unknown rather than becoming a fake 0.
+  const raw =
+    entry.raw && typeof entry.raw === "object" && typeof entry.raw.bankedResetCredits === "number"
+      ? { ...entry.raw, bankedResetCredits: Math.max(0, entry.raw.bankedResetCredits - 1) }
+      : entry.raw;
+  return { ...entry, quotas, raw };
+}
+
+/** An authoritative empty reset-credit list: record the zero so the card hides its entry point. */
+export function applyEmptyResetCreditList(entry: any): any {
+  const base = entry && typeof entry === "object" ? entry : {};
+  return {
+    ...base,
+    quotas: Array.isArray(base.quotas)
+      ? base.quotas.filter((quota: any) => !quota?.isResetCredits)
+      : base.quotas,
+    raw: { ...(base.raw && typeof base.raw === "object" ? base.raw : {}), bankedResetCredits: 0 },
+  };
+}
+
 interface ResetCreditRequestState {
   idempotencyKeysRef: React.MutableRefObject<Record<string, string>>;
   redeemingResetCreditId: string | null;
@@ -58,26 +92,43 @@ function useOpenCodexResetCredits(
   setLoadingResetCreditsId: React.Dispatch<React.SetStateAction<string | null>>,
   setResetCreditPicker: React.Dispatch<React.SetStateAction<ResetCreditPickerState | null>>,
   idempotencyKeysRef: React.MutableRefObject<Record<string, string>>,
+  setQuotaData: React.Dispatch<React.SetStateAction<Record<string, any>>>,
   tr: TranslateUsage
 ) {
   const notify = useNotificationStore();
   return useCallback(
     async (connectionId: string, provider: string) => {
-      if (provider !== "codex" || loadingResetCreditsId || redeemingResetCreditId) return;
+      if (
+        (provider !== "codex" && provider !== "claude") ||
+        loadingResetCreditsId ||
+        redeemingResetCreditId
+      ) {
+        return;
+      }
       setLoadingResetCreditsId(connectionId);
       setErrors((prev) => ({ ...prev, [connectionId]: null }));
       try {
         const response = await fetch(
-          `/api/usage/codex-reset-credit?connectionId=${encodeURIComponent(connectionId)}`,
+          `/api/usage/codex-reset-credit?connectionId=${encodeURIComponent(
+            connectionId
+          )}&provider=${encodeURIComponent(provider)}`,
           { cache: "no-store" }
         );
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || response.statusText);
         idempotencyKeysRef.current = {};
+        const credits = Array.isArray(data.credits) ? data.credits : [];
+        if (provider === "claude" && credits.length === 0) {
+          setQuotaData((prev) =>
+            prev[connectionId]
+              ? { ...prev, [connectionId]: applyEmptyResetCreditList(prev[connectionId]) }
+              : prev
+          );
+        }
         setResetCreditPicker({
           connectionId,
           provider,
-          credits: Array.isArray(data.credits) ? data.credits : [],
+          credits,
           availableCount: Number.isFinite(Number(data.availableCount))
             ? Number(data.availableCount)
             : 0,
@@ -100,6 +151,7 @@ function useOpenCodexResetCredits(
       redeemingResetCreditId,
       setErrors,
       setLoadingResetCreditsId,
+      setQuotaData,
       setResetCreditPicker,
       tr,
     ]
@@ -118,28 +170,41 @@ function useRedeemCodexResetCredit(state: ResetCreditRequestState) {
       state.setRedeemingResetCreditId(picker.connectionId);
       state.setErrors((prev) => ({ ...prev, [picker.connectionId]: null }));
       try {
-        const response = await fetch("/api/usage/codex-reset-credit", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            connectionId: picker.connectionId,
-            idempotencyKey,
-            creditId: selectionToken,
-          }),
-        });
+        const response = await fetch(
+          `/api/usage/codex-reset-credit?provider=${encodeURIComponent(picker.provider)}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              connectionId: picker.connectionId,
+              idempotencyKey,
+              creditId: selectionToken,
+            }),
+          }
+        );
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || response.statusText);
-        const usage = data.usage || {};
-        state.setQuotaData((prev) => ({
-          ...prev,
-          [picker.connectionId]: {
-            quotas: parseQuotaData(picker.provider, usage),
-            plan: usage.plan || null,
-            message: usage.message || null,
-            raw: usage,
-            stale: usage._stale ? { since: usage._staleSince, reason: usage._staleReason } : null,
-          },
-        }));
+        const refreshPending = data.refreshPending === true && !data.usage;
+        if (refreshPending) {
+          state.setQuotaData((prev) => {
+            const entry = prev[picker.connectionId];
+            return entry
+              ? { ...prev, [picker.connectionId]: applyCommittedResetCreditFallback(entry) }
+              : prev;
+          });
+        } else {
+          const usage = data.usage || {};
+          state.setQuotaData((prev) => ({
+            ...prev,
+            [picker.connectionId]: {
+              quotas: parseQuotaData(picker.provider, usage),
+              plan: usage.plan || null,
+              message: usage.message || null,
+              raw: usage,
+              stale: usage._stale ? { since: usage._staleSince, reason: usage._staleReason } : null,
+            },
+          }));
+        }
         state.setLastRefreshedAt((prev) => ({
           ...prev,
           [picker.connectionId]: new Date().toISOString(),
@@ -180,6 +245,7 @@ export function useCodexResetCreditRedemption(
     setLoadingResetCreditsId,
     setResetCreditPicker,
     idempotencyKeysRef,
+    setQuotaData,
     tr
   );
   const redeemCodexResetCredit = useRedeemCodexResetCredit({

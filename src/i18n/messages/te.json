@@ -5411,6 +5411,10 @@
     "grokWebCookieHint": "Grok Web Cookie Hint",
     "blockClaudeExtraUsageDescription": "__MISSING__:When enabled, OmniRoute marks this Claude connection unavailable as soon as the usage API reports queued extra usage, so fallback switches to another connection instead of continuing on pay-as-you-go extra billing.",
     "blockClaudeExtraUsageLabel": "__MISSING__:Block extra Claude usage",
+    "claudeLowPriorityModeLabel": "Continue at lower priority after the 5-hour limit",
+    "claudeLowPriorityModeDescription": "When this account hits its 5-hour usage limit and Anthropic offers the lower-priority lane, OmniRoute accepts it and keeps sending requests with anthropic-usage-limit: slow until the window resets, instead of cooling the connection down. The weekly limit still applies and responses may wait for spare capacity.",
+    "claudeAutoLimitResetLabel": "Auto-reset the session limit (once a week)",
+    "claudeAutoLimitResetDescription": "When this account hits its 5-hour usage limit and a session-limit reset is available, OmniRoute claims it automatically and retries at full speed. Uses the account's once-a-week reset and still counts toward the weekly limit.",
     "disableCoolingDescription": "తాత్కాలిక కూల్‌డౌన్‌ను దాటవేయండి, తద్వారా రికవర్ చేయగల ఎర్రర్‌ల తర్వాత కూడా ఈ కనెక్షన్ అర్హత కలిగి ఉంటుంది (banned/expired వంటి టెర్మినల్ స్థితులు ఇప్పటికీ వర్తిస్తాయి).",
     "disableCoolingLabel": "ఈ కనెక్షన్ కోసం కూల్‌డౌన్‌ను నిలిపివేయండి",
     "bulkPasteAdded": "{count, plural, one {1 key added} other {# keys added}}",
@@ -8851,7 +8855,11 @@
     "updatedShort": "అప్‌డేట్ చేయబడింది",
     "lastRefreshed": "చివరిగా రిఫ్రెష్ చేయబడింది",
     "providerQuota": "ప్రొవైడర్ కోటా",
-    "providerQuotaHomeHint": "కనెక్ట్ చేయబడిన ఖాతాల ప్రత్యక్ష స్థితి"
+    "providerQuotaHomeHint": "కనెక్ట్ చేయబడిన ఖాతాల ప్రత్యక్ష స్థితి",
+    "claudeResetCreditDefaultTitle": "Claude పరిమితి రీసెట్",
+    "confirmRedeemClaudeResetCredit": "రీడీమ్ చేయడం వలన అర్హత ఉన్న Claude వినియోగ పరిమితులు తక్షణమే రీసెట్ చేయబడతాయి మరియు ఈ క్రెడిట్ శాశ్వతంగా వినియోగించబడుతుంది.",
+    "claudeResetCreditsModalTitle": "Claude రీసెట్ క్రెడిట్‌లు",
+    "claudeResetCreditsModalExplainer": "ఈ ఖాతా కోసం అందుబాటులో ఉన్న Claude రీసెట్ క్రెడిట్‌లు మరియు వారపు సెషన్ రీసెట్‌లు."
   },
   "modals": {
     "waitingAuth": "Waiting for Authorization",

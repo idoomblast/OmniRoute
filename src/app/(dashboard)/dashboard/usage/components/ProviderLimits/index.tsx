@@ -1056,6 +1056,7 @@ export default function ProviderLimits({
           isOpen={true}
           credits={resetCreditRedemption.resetCreditPicker.credits}
           availableCount={resetCreditRedemption.resetCreditPicker.availableCount}
+          provider={resetCreditRedemption.resetCreditPicker.provider}
           loading={resetCreditRedemption.redeemingResetCreditId !== null}
           onClose={resetCreditRedemption.closeResetCreditPicker}
           onRedeem={resetCreditRedemption.redeemCodexResetCredit}

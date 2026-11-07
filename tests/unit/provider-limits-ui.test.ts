@@ -390,3 +390,65 @@ test("provider quota auto-refresh settings are accepted by the settings schema",
 
   assert.equal(result.success, true);
 });
+
+test("Claude banked reset credits parse as a reset-credit counter", () => {
+  const parsed = providerLimitUtils.parseQuotaData("claude", {
+    quotas: {
+      five_hour: { used: 37.25, total: 100, remainingPercentage: 62.75, isPercentageOnly: true },
+    },
+    bankedResetCredits: 2,
+  }) as ParsedQuota[];
+  const resetCredits = parsed.find((quota) => quota.name === "banked_reset_credits");
+  assert.ok(resetCredits);
+  assert.equal(resetCredits.isResetCredits, true);
+  assert.equal(resetCredits.creditCount, 2);
+});
+
+test("Claude omits the reset-credit row when bankedResetCredits is absent", () => {
+  const parsed = providerLimitUtils.parseQuotaData("claude", {
+    quotas: {
+      five_hour: { used: 37.25, total: 100, remainingPercentage: 62.75 },
+    },
+  }) as ParsedQuota[];
+  assert.equal(
+    parsed.some((quota) => quota.name === "banked_reset_credits"),
+    false
+  );
+});
+
+test("Claude exposes the redeem button when banked reset credits are present", () => {
+  const parsed = providerLimitUtils.parseQuotaData("claude", {
+    quotas: { five_hour: { used: 0, total: 100, remainingPercentage: 100 } },
+    bankedResetCredits: 2,
+  });
+  assert.equal(providerLimitUtils.computeCanRedeemResetCredit("claude", parsed), true);
+  assert.equal(providerLimitUtils.computeCanRedeemResetCredit("codex", parsed), true);
+  // A genuinely unsupported provider stays the negative control.
+  assert.equal(providerLimitUtils.computeCanRedeemResetCredit("openai", parsed), false);
+});
+
+test("an OAuth Claude card with an unknown count keeps its reset-credit entry point", () => {
+  const parsed: ParsedQuota[] = [];
+  assert.equal(
+    providerLimitUtils.computeCanRedeemResetCredit("claude", parsed, {
+      raw: {},
+      authType: "oauth",
+    }),
+    true
+  );
+  // An authoritative zero hides it, and an API-key connection never offers it.
+  assert.equal(
+    providerLimitUtils.computeCanRedeemResetCredit("claude", parsed, {
+      raw: { bankedResetCredits: 0 },
+      authType: "oauth",
+    }),
+    false
+  );
+  assert.equal(
+    providerLimitUtils.computeCanRedeemResetCredit("claude", parsed, {
+      raw: {},
+      authType: "api-key",
+    }),
+    false
+  );
+});
