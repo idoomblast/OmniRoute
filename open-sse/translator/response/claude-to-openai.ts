@@ -39,20 +39,30 @@ function thinkingBlocksOf(state): Map<number, Record<string, string>> {
   return state.claudeThinkingBlocks;
 }
 
+/** Text length per content-block index, so replay can restore text boundaries. */
+function textLengthsOf(state): Map<number, number> {
+  if (!(state.claudeTextLengths instanceof Map)) state.claudeTextLengths = new Map();
+  return state.claudeTextLengths;
+}
+
 function flushThinkingContinuity(state) {
   if (state.claudeThinkingFlushed) return;
   state.claudeThinkingFlushed = true;
   const blocks = thinkingBlocksOf(state);
   if (blocks.size === 0 || !(state.toolCalls instanceof Map) || state.toolCalls.size === 0) return;
-  const indexed: Array<[number, Record<string, unknown>]> = [
-    ...blocks.entries(),
-    ...[...state.toolCalls.entries()].map(
-      ([index, toolCall]): [number, Record<string, unknown>] => [
-        index,
-        { type: "tool_use", id: toolCall?.id },
-      ]
-    ),
-  ];
+  const textLengths = textLengthsOf(state);
+  const indexSet = new Set<number>([
+    ...blocks.keys(),
+    ...textLengths.keys(),
+    ...state.toolCalls.keys(),
+  ]);
+  const indexed: Array<[number, Record<string, unknown>]> = [...indexSet].map((index) => {
+    const thinking = blocks.get(index);
+    if (thinking) return [index, thinking];
+    const toolCall = state.toolCalls.get(index);
+    if (toolCall) return [index, { type: "tool_use", id: toolCall?.id }];
+    return [index, { type: "text", length: textLengths.get(index) ?? 0 }];
+  });
   storeClaudeThinkingBlocks({
     content: indexed.sort(([left], [right]) => left - right).map(([, block]) => block),
     provider: state.provider,
@@ -124,6 +134,10 @@ export function claudeToOpenAIResponse(chunk, state) {
       const block = chunk.content_block;
       if (block?.type === "text") {
         state.textBlockStarted = true;
+        textLengthsOf(state).set(
+          chunk.index,
+          typeof block.text === "string" ? block.text.length : 0
+        );
       } else if (block?.type === "thinking") {
         thinkingBlocksOf(state).set(chunk.index, {
           type: "thinking",
@@ -160,6 +174,10 @@ export function claudeToOpenAIResponse(chunk, state) {
     case "content_block_delta": {
       const delta = chunk.delta;
       if (delta?.type === "text_delta" && delta.text) {
+        textLengthsOf(state).set(
+          chunk.index,
+          (textLengthsOf(state).get(chunk.index) ?? 0) + delta.text.length
+        );
         // Flush the deferred </think> close marker before the first text delta so
         // clients like Claude Code / Cursor (that scan content for </think>) see it
         // immediately before the assistant reply begins — but NOT in tool-use streams

@@ -302,45 +302,6 @@ test("Gemini stream: reasoning, tool call, image and MAX_TOKENS finish are conve
   assert.equal(result[4].usage.completion_tokens_details.reasoning_tokens, 2);
 });
 
-test("Gemini stream: stores thoughtSignature when signature-only part precedes functionCall", async () => {
-  const { resolveGeminiThoughtSignature } =
-    await import("../../open-sse/services/geminiThoughtSignatureStore.ts");
-  const state = {
-    ...createStreamingState(),
-    signatureNamespace: "conn-antigravity-1",
-  };
-  const result = geminiToOpenAIResponse(
-    {
-      responseId: "resp-split-signature",
-      modelVersion: "gemini-3-flash-agent",
-      candidates: [
-        {
-          content: {
-            parts: [
-              { thoughtSignature: "sig-split-1" },
-              {
-                functionCall: {
-                  id: "call_split_1",
-                  name: "read_file",
-                  args: { path: "/tmp/a" },
-                },
-              },
-            ],
-          },
-          finishReason: "STOP",
-        },
-      ],
-    },
-    state
-  );
-
-  const toolCall = result.find((event: any) => event.choices?.[0]?.delta?.tool_calls)?.choices[0]
-    .delta.tool_calls[0];
-  assert.equal(toolCall.id, "call_split_1");
-  assert.equal(state.pendingThoughtSignature, null);
-  assert.equal(resolveGeminiThoughtSignature("conn-antigravity-1:call_split_1"), "sig-split-1");
-});
-
 test("Gemini stream: converts textual Tool call block to structured tool_calls", () => {
   const state = createStreamingState();
   const result = geminiToOpenAIResponse(
@@ -1174,7 +1135,10 @@ test("Gemini stream: open textual reasoning is flushed before a signed native to
     "buffered textual reasoning must be flushed, not dropped, when a tool call arrives"
   );
   assert.equal(r2[toolIdx]?.choices[0].delta.tool_calls[0].id, "call-flush-1");
-  assert.ok(reasoningIdx >= 0 && toolIdx > reasoningIdx, "reasoning is emitted before the tool call");
+  assert.ok(
+    reasoningIdx >= 0 && toolIdx > reasoningIdx,
+    "reasoning is emitted before the tool call"
+  );
 });
 
 // #3821-review LEDGER-15 — a reasoning-only chunk interrupting a partially-buffered

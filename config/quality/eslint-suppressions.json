@@ -2297,7 +2297,7 @@
   },
   "tests/unit/translator-resp-gemini-to-openai.test.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 75
+      "count": 74
     }
   },
   "tests/unit/translator-resp-openai-to-claude.test.ts": {

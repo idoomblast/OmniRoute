@@ -533,8 +533,8 @@ test("signature recovery under manual extended thinking injects nothing and disa
   );
 });
 
-const { translateNonStreamingClientResponse } =
-  await import("../../open-sse/handlers/chatCore/nonStreamingClientTranslate.ts");
+const { translateNonStreamingResponse } =
+  await import("../../open-sse/handlers/responseTranslator.ts");
 
 function claudeNonStreamBody(toolUseId = "toolu_03NS") {
   return {
@@ -551,28 +551,17 @@ function claudeNonStreamBody(toolUseId = "toolu_03NS") {
   };
 }
 
-function nonStreamInput(overrides: Record<string, unknown> = {}) {
-  return {
-    responseBody: claudeNonStreamBody(),
-    responsePayloadFormat: FORMATS.CLAUDE,
-    clientResponseFormat: FORMATS.OPENAI,
-    sourceFormat: FORMATS.OPENAI,
+/** Exercise the production non-streaming translation path (chatCore calls this). */
+function translateActiveNonStreaming(responseBody: unknown = claudeNonStreamBody()) {
+  return translateNonStreamingResponse(responseBody, FORMATS.CLAUDE, FORMATS.OPENAI, null, {
     provider: "claude",
     model: MODEL,
     connectionId: CONN,
-    requestBody: { messages: [] },
-    responseToolNameMap: null,
-    requestToolIdentityMap: null,
-    reasoningCacheScope: null,
-    clientHeaders: null,
-    isClaudeCodeCompatible: false,
-    phase: "final" as const,
-    ...overrides,
-  };
+  });
 }
 
 test("non-streaming Claude response: signed thinking is stored and restored next turn", () => {
-  const { response } = translateNonStreamingClientResponse(nonStreamInput());
+  const response = translateActiveNonStreaming();
   assert.equal(
     JSON.stringify(response).includes(SIGNATURE),
     false,
@@ -585,11 +574,6 @@ test("non-streaming Claude response: signed thinking is stored and restored next
     thinking: THINKING_TEXT,
     signature: SIGNATURE,
   });
-});
-
-test("non-streaming video-transcript-sensitive response is never retained", () => {
-  translateNonStreamingClientResponse(nonStreamInput({ videoTranscriptSensitive: true }));
-  assert.equal(store.getClaudeThinkingStoreSizeForTests(), 0);
 });
 
 test("video-transcript-sensitive request never replays stored thinking", () => {

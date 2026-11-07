@@ -34,10 +34,16 @@ export type ClaudeSignedThinkingBlock =
  * a block around intervening text instead of collapsing every block to the turn
  * start (#18607 review).
  */
+export type ClaudeThinkingLayoutToken =
+  { kind: "signed"; block: ClaudeSignedThinkingBlock } | { kind: "text"; length: number };
+
 export type ClaudeThinkingSegment = {
   toolUseId: string;
   blocks: ClaudeSignedThinkingBlock[];
   gaps?: number[];
+  /** Ordered layout between the previous tool_use and this one (signed blocks +
+   *  text lengths), so replay can restore exact text boundaries. */
+  layout?: ClaudeThinkingLayoutToken[];
 };
 
 type Entry = {
@@ -110,6 +116,13 @@ function cloneSegments(segments: ClaudeThinkingSegment[]): ClaudeThinkingSegment
     toolUseId: segment.toolUseId,
     blocks: segment.blocks.map((block) => ({ ...block })),
     ...(segment.gaps ? { gaps: [...segment.gaps] } : {}),
+    ...(segment.layout
+      ? {
+          layout: segment.layout.map((token) =>
+            token.kind === "signed" ? { kind: "signed", block: { ...token.block } } : token
+          ),
+        }
+      : {}),
   }));
 }
 
@@ -149,6 +162,7 @@ function collectThinkingSegments(
 ): { segments: ClaudeThinkingSegment[]; size: number } | null {
   const segments: ClaudeThinkingSegment[] = [];
   let pending: ClaudeSignedThinkingBlock[] = [];
+  let layout: ClaudeThinkingLayoutToken[] = [];
   // Non-signed blocks seen since the previous signed block; recorded per signed
   // block so a restore can put it back around intervening text.
   let gap = 0;
@@ -161,15 +175,26 @@ function collectThinkingSegments(
       if (!normalized) return null;
       pending.push(normalized);
       pendingGaps.push(gap);
+      layout.push({ kind: "signed", block: normalized });
       gap = 0;
       size += blockSize(normalized);
     } else if (record.type === "tool_use" && typeof record.id === "string" && record.id) {
-      segments.push({ toolUseId: record.id, blocks: pending, gaps: [...pendingGaps] });
+      segments.push({ toolUseId: record.id, blocks: pending, gaps: [...pendingGaps], layout });
       pending = [];
       pendingGaps.length = 0;
+      layout = [];
       gap = 0;
     } else {
       gap++;
+      if (record.type === "text") {
+        const length =
+          typeof record.text === "string"
+            ? record.text.length
+            : typeof record.length === "number" && record.length > 0
+              ? record.length
+              : 0;
+        layout.push({ kind: "text", length });
+      }
     }
   }
   if (size === 0 || size > MAX_CLAUDE_THINKING_ENTRY_CHARS || pending.length > 0) return null;

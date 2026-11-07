@@ -15,9 +15,16 @@ const importTokenLocks = new Map<string, Promise<unknown>>();
 export function withImportTokenLock<T>(key: string, task: () => Promise<T>): Promise<T> {
   const previous = importTokenLocks.get(key) ?? Promise.resolve();
   const run = previous.catch(() => undefined).then(task);
-  const tail = run.finally(() => {
-    if (importTokenLocks.get(key) === tail) importTokenLocks.delete(key);
-  });
+  // `finally` on `run` would create a second rejected promise nobody observes.
+  // Settle first, then clean up on the always-resolved tail.
+  const tail = run
+    .then(
+      () => undefined,
+      () => undefined
+    )
+    .finally(() => {
+      if (importTokenLocks.get(key) === tail) importTokenLocks.delete(key);
+    });
   importTokenLocks.set(key, tail);
   return run;
 }

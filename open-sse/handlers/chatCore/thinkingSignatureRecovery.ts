@@ -3,6 +3,7 @@ import {
   isAnthropicThinkingSignatureError,
   isAnthropicThinkingModifiedError,
 } from "./passthroughHelpers.ts";
+import { emitThinkingSignatureDiagnostics } from "./thinkingSignatureDiagnostics.ts";
 
 type ProviderExecution = {
   response: Response;
@@ -43,6 +44,11 @@ export async function recoverAnthropicThinkingSignature(args: {
   body: unknown;
   execute: (body: unknown) => Promise<ProviderExecution>;
   parseError: (response: Response) => Promise<ParsedError>;
+  diagnostics?: {
+    correlationId?: string | null;
+    noLog?: boolean;
+    log?: { warn?: (tag: string, message: string) => void } | null;
+  };
 }): Promise<ThinkingSignatureRecoveryResult> {
   const errorArgs = {
     provider: args.provider,
@@ -95,11 +101,28 @@ export async function recoverAnthropicThinkingSignature(args: {
   }
 
   const execution = recovery.result as ProviderExecution;
+  const error = execution.response.ok ? null : await args.parseError(execution.response);
+  emitThinkingSignatureDiagnostics(
+    {
+      correlationId: args.diagnostics?.correlationId ?? null,
+      provider: args.provider,
+      model: args.model,
+      status: args.statusCode,
+      message: args.message,
+      ingressBody: args.body,
+      outboundBody: recovery.recoveryBody,
+      recoveryAttempted: true,
+      recoverySucceeded: execution.response.ok,
+      outboundBodyCaptured: recovery.recoveryBody != null,
+    },
+    args.diagnostics?.noLog === true,
+    args.diagnostics?.log ?? null
+  );
   return {
     attempted: true,
     succeeded: execution.response.ok,
     execution,
-    error: execution.response.ok ? null : await args.parseError(execution.response),
+    error,
     recoveryBody: recovery.recoveryBody,
   };
 }

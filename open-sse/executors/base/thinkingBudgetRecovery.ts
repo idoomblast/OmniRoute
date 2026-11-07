@@ -55,7 +55,7 @@ export async function recoverThinkingBudget(args: {
   if (args.requiresSigning) retryBody = await args.signBody(retryBody);
   args.log?.info?.(
     "THINKING_BUDGET",
-    `Upstream 400 rejected thinking_budget on ${url} — clamped to ${upstreamMax} and retrying (learned for ${args.provider}/${args.model})`
+    `Upstream 400 rejected thinking_budget — clamped to ${upstreamMax} and retrying (learned for ${args.provider}/${args.model})`
   );
   return {
     response: await fetchFn(url, { ...fetchOptions, body: retryBody }),

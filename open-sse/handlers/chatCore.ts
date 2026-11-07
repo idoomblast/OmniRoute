@@ -58,8 +58,6 @@ import {
   forwardDashboardEventToLiveWs,
   maybeSyncClaudeExtraUsageState,
 } from "./chatCore/telemetryHelpers.ts";
-// Re-export the previously inline-defined helpers so existing importers of these
-// symbols from chatCore.ts (tests, sibling modules) keep resolving after the split.
 export {
   shouldUseNativeCodexPassthrough,
   redactPassthroughThinkingSignatures,
@@ -3622,6 +3620,7 @@ export async function handleChatCore({
       statusCode,
       message,
       body: translatedBody,
+      diagnostics: { correlationId, noLog: noLogEnabled, log },
       execute: async (recoveryBody) => {
         translatedBody = recoveryBody as typeof translatedBody;
         return executeProviderRequest(currentModel, false);

@@ -66,20 +66,68 @@ export function applyAssistantThinkingContinuity(args: {
     // Reinsert each stored block at its original distance from the tool_use
     // (counted in non-signed blocks), so [thinking, text, redacted, tool_use]
     // stays in that order instead of collapsing to [thinking, redacted, text, ...].
-    let cursor = 0;
-    for (const { toolUseId, blocks: signed, gaps } of restored ?? []) {
-      const owner = blocks.findIndex(
-        (b, i) => i >= cursor && b.type === "tool_use" && b.id === toolUseId
-      );
-      if (owner < 0) continue;
-      for (let i = 0; i < signed.length; i++) {
-        const gap = typeof gaps?.[i] === "number" && gaps[i] >= 0 ? gaps[i] : 0;
-        const at = Math.min(blocks.length, cursor + gap);
-        blocks.splice(at, 0, signed[i]);
-        cursor = at + 1;
+    // Exact-layout replay: when the store carries the ordering of signed blocks and
+    // text lengths for every tool_use in this fragment, rebuild the original block
+    // sequence (including text boundaries) instead of injecting at a cursor. Any
+    // mismatch (client edited text, split fragments, non-text extras) falls back to
+    // the cursor path below.
+    const restoredSegments = restored ?? [];
+    const segmentById = new Map(restoredSegments.map((segment) => [segment.toolUseId, segment]));
+    const ownSegments = ownToolUseIds.map((id) => segmentById.get(id));
+    const contentText = blocks
+      .filter((b) => b.type === "text")
+      .map((b) => String(b.text ?? ""))
+      .join("");
+    const expectedTextLength = ownSegments.reduce(
+      (sum, segment) =>
+        sum +
+        (segment?.layout ?? []).reduce(
+          (segmentSum, token) => segmentSum + (token.kind === "text" ? token.length : 0),
+          0
+        ),
+      0
+    );
+    const canRebuildLayout =
+      ownSegments.every((segment) => segment?.layout != null) &&
+      blocks.every((b) => b.type === "text" || b.type === "tool_use") &&
+      expectedTextLength === contentText.length;
+    if (canRebuildLayout) {
+      const rebuilt: Array<Record<string, unknown>> = [];
+      let offset = 0;
+      for (const block of blocks) {
+        if (block.type === "text") continue;
+        const segment = segmentById.get(String(block.id));
+        for (const token of segment?.layout ?? []) {
+          if (token.kind === "signed") {
+            rebuilt.push({ ...token.block });
+          } else if (token.length > 0) {
+            rebuilt.push({ type: "text", text: contentText.slice(offset, offset + token.length) });
+            offset += token.length;
+          }
+        }
+        rebuilt.push(block);
+      }
+      if (offset === contentText.length) {
+        blocks.length = 0;
+        blocks.push(...rebuilt);
         hasThinkingBlock = true;
       }
-      cursor = Math.max(cursor, owner + signed.length + 1);
+    } else {
+      let cursor = 0;
+      for (const { toolUseId, blocks: signed, gaps } of restoredSegments) {
+        const owner = blocks.findIndex(
+          (b, i) => i >= cursor && b.type === "tool_use" && b.id === toolUseId
+        );
+        if (owner < 0) continue;
+        for (let i = 0; i < signed.length; i++) {
+          const gap = typeof gaps?.[i] === "number" && gaps[i] >= 0 ? gaps[i] : 0;
+          const at = Math.min(blocks.length, cursor + gap);
+          blocks.splice(at, 0, signed[i]);
+          cursor = at + 1;
+          hasThinkingBlock = true;
+        }
+        cursor = Math.max(cursor, owner + signed.length + 1);
+      }
     }
   }
   if (isKimiCoding && typeof msg.reasoning_content === "string" && !hasThinkingBlock) {

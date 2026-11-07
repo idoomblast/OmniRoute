@@ -9,6 +9,7 @@ import { restoreClaudeToolName } from "../services/claudeCodeToolRemapper.ts";
 import { sanitizeToolId } from "../translator/helpers/schemaCoercion.ts";
 import { getAnyReasoningValue } from "../utils/reasoningFields.ts";
 import { storeClaudeThinkingFromResponse } from "../services/claudeThinkingStore.ts";
+import { scopeGeminiThoughtSignatureNamespace } from "../services/geminiThoughtSignatureStore.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -137,13 +138,19 @@ export function translateNonStreamingResponse(
   targetFormat: string,
   sourceFormat: string,
   toolNameMap?: Map<string, string> | null,
-  claudeThinking?: { provider: string; model: string; connectionId?: string | null }
+  responseBinding?: { provider: string; model: string; connectionId?: string | null }
 ): unknown {
+  // Both response writers must key signatures exactly like the request reader
+  // (`<connection>:<family>:<toolId>`), or non-streaming continuity is lost.
+  const geminiSignatureNamespace = scopeGeminiThoughtSignatureNamespace(
+    responseBinding?.connectionId ?? null,
+    responseBinding?.model
+  );
   // Claude signed-thinking continuity (#17324): a non-Claude client never sees
   // the signed blocks of this turn, so keep them server-side for the next one.
   if (targetFormat === FORMATS.CLAUDE && sourceFormat !== FORMATS.CLAUDE) {
     try {
-      if (claudeThinking) storeClaudeThinkingFromResponse(responseBody, claudeThinking);
+      if (responseBinding) storeClaudeThinkingFromResponse(responseBody, responseBinding);
     } catch {}
   }
   // If already in source format, return as-is
@@ -398,7 +405,10 @@ export function translateNonStreamingResponse(
                     // captured from an earlier thinking-only part.
                     const sig = partThoughtSig || pendingThoughtSignature;
                     if (sig) {
-                      const sigKey = buildGeminiThoughtSignatureKey(null, toolCallId);
+                      const sigKey = buildGeminiThoughtSignatureKey(
+                        geminiSignatureNamespace,
+                        toolCallId
+                      );
                       storeGeminiThoughtSignature(sigKey, sig);
                     }
 
