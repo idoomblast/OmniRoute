@@ -1,5 +1,4 @@
 import { getDbInstance } from "./core";
-import { invalidateDbCache } from "./readCache";
 
 export type ModelCapabilityOverrideKey = "max_input_tokens" | "max_output_tokens" | "max_token";
 
@@ -110,7 +109,6 @@ export function setModelCapabilityOverride(
         "VALUES (?, ?, ?, ?, datetime('now'))"
     )
     .run(parsedTarget.provider, parsedTarget.modelId, key, JSON.stringify(value));
-  invalidateDbCache("model-capabilities");
   return true;
 }
 
@@ -127,7 +125,6 @@ export function removeModelCapabilityOverride(
         "WHERE provider = ? AND model_id = ? AND override_key = ?"
     )
     .run(parsedTarget.provider, parsedTarget.modelId, key);
-  if (info.changes > 0) invalidateDbCache("model-capabilities");
   return info.changes > 0;
 }
 

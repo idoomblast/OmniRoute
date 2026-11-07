@@ -492,11 +492,14 @@ function getMaxTokenCapabilityOverride(resolved: {
   model: string | null;
   rawModel: string | null;
 }): number | null {
+  const lookup = (model: string | null) =>
+    model
+      ? (getModelCapabilityOverride(resolved.provider, model, "max_output_tokens") ??
+        getModelCapabilityOverride(resolved.provider, model, "max_token"))
+      : null;
   return (
-    getModelCapabilityOverride(resolved.provider, resolved.model, "max_token") ??
-    (resolved.rawModel && resolved.rawModel !== resolved.model
-      ? getModelCapabilityOverride(resolved.provider, resolved.rawModel, "max_token")
-      : null)
+    lookup(resolved.model) ??
+    (resolved.rawModel && resolved.rawModel !== resolved.model ? lookup(resolved.rawModel) : null)
   );
 }
 
