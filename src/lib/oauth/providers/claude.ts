@@ -1,7 +1,9 @@
 import crypto from "node:crypto";
 import { CLAUDE_CONFIG } from "../constants/oauth";
 import { getClaudeCodeVersion } from "@omniroute/open-sse/executors/claudeIdentity.ts";
+import { validateClaudeOAuthInline } from "@/lib/providers/validation/anthropicFormat";
 
+const SETUP_TOKEN_PREFIX = "sk-ant-oat";
 const BOOTSTRAP_FETCH_TIMEOUT_MS = 10_000;
 
 // Best-effort: failure must not block OAuth — the access token is valid.
@@ -78,8 +80,44 @@ function extractClaudePlan(tokens: unknown, extra: unknown): string | undefined 
   );
 }
 
+class ClaudeSetupTokenError extends Error {
+  readonly status = 400;
+}
+
+/**
+ * `claude setup-token` mints a 1-year OAuth token scoped to `user:inference` only:
+ * no refresh token, and bootstrap/profile answer 403, so there is no email or
+ * account UUID to learn. A live one-token request is therefore the only proof
+ * the token works, and it runs before anything is stored.
+ */
+async function importSetupToken(token: unknown) {
+  const accessToken = typeof token === "string" ? token.trim() : "";
+  if (!accessToken.startsWith(SETUP_TOKEN_PREFIX)) {
+    throw new ClaudeSetupTokenError(
+      `Expected a token from \`claude setup-token\` (starts with ${SETUP_TOKEN_PREFIX})`
+    );
+  }
+  const check = await validateClaudeOAuthInline({ apiKey: accessToken, modelId: null });
+  if (!check.valid) {
+    throw new ClaudeSetupTokenError(
+      `Could not verify this setup token with Anthropic (${check.error})`
+    );
+  }
+  return {
+    name: "Setup token",
+    accessToken,
+    refreshToken: null,
+    expiresIn: null,
+    providerSpecificData: {
+      cliUserID: crypto.randomBytes(32).toString("hex"),
+      autoSync: true,
+    },
+  };
+}
+
 export const claude = {
   config: CLAUDE_CONFIG,
+  importToken: importSetupToken,
   flowType: "authorization_code_pkce",
   buildAuthUrl: (config, _redirectUri, state, codeChallenge) => {
     const params = new URLSearchParams({

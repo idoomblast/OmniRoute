@@ -51,7 +51,7 @@ const DEVICE_CODE_PROVIDERS = new Set([
   "grok-cli",
 ]);
 
-const TOKEN_PASTE_PROVIDERS = new Set(["windsurf", "devin-cli", "grok-cli"]);
+const TOKEN_PASTE_PROVIDERS = new Set(["windsurf", "devin-cli", "grok-cli", "claude"]);
 
 /**
  * Phase 1 hotfix (2026-05-29): windsurf & devin-cli only support import-token.
@@ -60,6 +60,8 @@ const TOKEN_PASTE_PROVIDERS = new Set(["windsurf", "devin-cli", "grok-cli"]);
  * Spec: _tasks/superpowers/specs/2026-05-29-windsurf-login-fix-design.md.
  */
 const IMPORT_TOKEN_ONLY_PROVIDERS = new Set(["windsurf", "devin-cli"]);
+// Providers whose dialog opens on the paste tab (Claude's setup-token needs a paste first).
+const PASTE_FIRST_PROVIDERS = new Set([...IMPORT_TOKEN_ONLY_PROVIDERS, "claude"]);
 
 // POST a bare Codex access token to the access-token-only import endpoint
 // (#1290); shared by the bare-JWT and session-JSON paste branches (#6636).
@@ -151,7 +153,7 @@ export default function OAuthModal({
   const [deviceCodeExpiresAt, setDeviceCodeExpiresAt] = useState<number | null>(null);
   const [deviceCodeSecondsRemaining, setDeviceCodeSecondsRemaining] = useState<number | null>(null);
   // API-key paste mode for direct-token providers.
-  const [showPasteToken, setShowPasteToken] = useState(IMPORT_TOKEN_ONLY_PROVIDERS.has(provider));
+  const [showPasteToken, setShowPasteToken] = useState(PASTE_FIRST_PROVIDERS.has(provider));
   const [pasteToken, setPasteToken] = useState("");
   const [savingToken, setSavingToken] = useState(false);
   // grok-cli only (#7013 rework): device_code is the default method (matches
@@ -669,7 +671,7 @@ export default function OAuthModal({
   useEffect(() => {
     if (!isOpen || !provider || flowStartedRef.current) return;
     flowStartedRef.current = true;
-    const startsInPasteMode = IMPORT_TOKEN_ONLY_PROVIDERS.has(provider);
+    const startsInPasteMode = PASTE_FIRST_PROVIDERS.has(provider);
     // #8688: show GitLab Duo OAuth app / env setup before authorize error.
     const startsInGitlabDuoSetup = provider === "gitlab-duo";
     setShowPasteToken(startsInPasteMode);
@@ -975,7 +977,11 @@ export default function OAuthModal({
               className={`text-sm px-3 py-1 rounded-t ${showPasteToken ? "font-semibold border-b-2 border-primary text-primary" : "text-text-muted"}`}
               onClick={handlePasteMode}
             >
-              {provider === "grok-cli" ? "Import auth.json" : "Paste API Key"}
+              {provider === "grok-cli"
+                ? "Import auth.json"
+                : provider === "claude"
+                  ? "Setup Token"
+                  : "Paste API Key"}
             </button>
           </div>
         )}
@@ -988,7 +994,9 @@ export default function OAuthModal({
                 ? 'In the Windsurf / VS Code IDE, run the "Windsurf: Provide Auth Token" command from the command palette (or click the Jupyter "Get Windsurf Authentication Token" button), then copy the shown token and paste it below. Opening windsurf.com/show-auth-token directly only shows a "Redirecting" page — the IDE must initiate the flow.'
                 : provider === "grok-cli"
                   ? 'Paste the FULL contents of ~/.grok/auth.json (not just the JWT "key" field). A bare JWT has no refresh_token, so the connection dies after expiry (#7610). Prefer the dedicated Import auth.json modal when available.'
-                  : 'Provide your WINDSURF_API_KEY (obtained via `devin auth login`, or via the Windsurf IDE "Windsurf: Provide Auth Token" command).'}
+                  : provider === "claude"
+                    ? "Run `claude setup-token` in a terminal, then paste the sk-ant-oat token below. It is verified with Anthropic before it is saved."
+                    : 'Provide your WINDSURF_API_KEY (obtained via `devin auth login`, or via the Windsurf IDE "Windsurf: Provide Auth Token" command).'}
             </p>
             {provider === "grok-cli" ? (
               <textarea
@@ -1002,7 +1010,7 @@ export default function OAuthModal({
               <Input
                 value={pasteToken}
                 onChange={(e) => setPasteToken(e.target.value)}
-                placeholder="ws-..."
+                placeholder={provider === "claude" ? "sk-ant-oat..." : "ws-..."}
                 type="password"
                 label="API Key / Token"
               />
