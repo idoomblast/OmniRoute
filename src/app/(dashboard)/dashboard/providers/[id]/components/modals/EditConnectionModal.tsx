@@ -144,6 +144,7 @@ export default function EditConnectionModal({
     passthroughModels: connectionProviderSpecificData?.passthroughModels === true,
     disableCooling: connectionProviderSpecificData?.disableCooling === true,
     keepMidConversationSystem: connectionProviderSpecificData?.keepMidConversationSystem === true,
+    requireUserLastMessage: connectionProviderSpecificData?.requireUserLastMessage === true,
     importFreeModelsOnly: connectionProviderSpecificData?.importFreeModelsOnly === true,
     m365Tier: normalizeM365TierValue(connectionProviderSpecificData?.tier) as M365TierValue,
   });
@@ -338,6 +339,7 @@ export default function EditConnectionModal({
         disableCooling: connection?.providerSpecificData?.disableCooling === true,
         keepMidConversationSystem:
           connection?.providerSpecificData?.keepMidConversationSystem === true,
+        requireUserLastMessage: connection?.providerSpecificData?.requireUserLastMessage === true,
         importFreeModelsOnly: connection?.providerSpecificData?.importFreeModelsOnly === true,
         m365Tier: normalizeM365TierValue(connection.providerSpecificData?.tier) as M365TierValue,
       });
@@ -579,6 +581,9 @@ export default function EditConnectionModal({
         if (isPlainAnthropicCompatible) {
           updates.providerSpecificData.keepMidConversationSystem =
             formData.keepMidConversationSystem ? true : undefined;
+          updates.providerSpecificData.requireUserLastMessage = formData.requireUserLastMessage
+            ? true
+            : undefined;
         }
         if (isCodex) {
           updates.providerSpecificData.requestDefaults = {

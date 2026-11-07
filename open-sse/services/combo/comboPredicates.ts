@@ -14,6 +14,7 @@ import { isLocalStreamLifecycleError } from "@/shared/utils/circuitBreaker";
 import { CONTEXT_OVERFLOW_PATTERNS, MODEL_ACCESS_DENIED_PATTERNS } from "../accountFallback.ts";
 import { isResourceNotFoundResponse } from "../errorClassifier.ts";
 import { isOpencodeFreeTierRefusal } from "../../executors/opencodeGeoBlock.ts";
+import { isAssistantPrefillUnsupported400 } from "../assistantPrefillError.ts";
 import type { ResolvedComboTarget } from "./types.ts";
 
 // Status codes that should mark round-robin target semaphores as cooling down.
@@ -224,7 +225,9 @@ export function isComboRequestScopedFailure(
     isRequestScopedUpstreamFailure(error) ||
     (status === 404 && isResourceNotFoundResponse(errorText)) ||
     // #14313: body-only free-tier refusals (relayed sentence, no error.type kept).
-    isOpencodeFreeTierRefusal(status, errorText)
+    isOpencodeFreeTierRefusal(status, errorText) ||
+    // Prefill ban: the body's shape, not the model/connection - even without error.type.
+    isAssistantPrefillUnsupported400(status, errorText)
   );
 }
 

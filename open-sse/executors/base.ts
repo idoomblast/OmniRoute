@@ -80,6 +80,10 @@ import {
   stripTrailingAssistantOrphanToolUse,
   stripTrailingAssistantForProvider,
 } from "../services/contextManager.ts";
+import {
+  requiresUserLastMessage,
+  stripTrailingAssistantTurns,
+} from "../services/assistantPrefill.ts";
 import { randomUUID } from "node:crypto";
 import {
   getClaudeCodeVersion,
@@ -1297,6 +1301,19 @@ export class BaseExecutor {
             // Some providers (e.g. Mistral) require the last message to be user
             // or tool and reject trailing assistant text messages with 400 (#3396).
             tb.messages = stripTrailingAssistantForProvider(stripped, this.provider);
+            // Per-connection opt-in for relays that ban assistant prefill.
+            if (requiresUserLastMessage(requestCredentials?.providerSpecificData)) {
+              const userLast = stripTrailingAssistantTurns(tb.messages as Record<string, unknown>[]);
+              tb.messages = userLast.messages;
+              if (userLast.removedTurns > 0 || userLast.noUserTurn) {
+                log?.info?.(
+                  "PREFILL",
+                  userLast.noUserTurn
+                    ? "requireUserLastMessage: no user turn to end on - forwarded unchanged"
+                    : `requireUserLastMessage: dropped ${userLast.removedTurns} trailing assistant turn(s)`
+                );
+              }
+            }
           }
         }
 

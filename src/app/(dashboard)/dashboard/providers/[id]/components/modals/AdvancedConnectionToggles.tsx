@@ -7,6 +7,7 @@ type AdvancedToggleValues = {
   importFreeModelsOnly: boolean;
   disableCooling: boolean;
   keepMidConversationSystem: boolean;
+  requireUserLastMessage: boolean;
 };
 
 type Props = {
@@ -40,6 +41,22 @@ export default function AdvancedConnectionToggles({
         label={t("disableCoolingLabel")}
         description={t("disableCoolingDescription")}
       />
+      {isPlainAnthropicCompatible && (
+        <Toggle
+          checked={values.requireUserLastMessage}
+          onChange={(checked) => onChange({ requireUserLastMessage: checked })}
+          label={providerText(
+            t,
+            "requireUserLastMessageLabel",
+            "Require a user message last (drop assistant prefill)"
+          )}
+          description={providerText(
+            t,
+            "requireUserLastMessageDescription",
+            'Drop trailing assistant turns before sending, for relays that reject assistant prefill with "The conversation must end with a user message". The model may regenerate an answer the client already has.'
+          )}
+        />
+      )}
       {isPlainAnthropicCompatible && (
         <Toggle
           checked={values.keepMidConversationSystem}

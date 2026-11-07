@@ -205,6 +205,14 @@ export function normalizeProviderSpecificData(
     delete normalized.autoFetchModels;
   }
 
+  // Assistant-prefill ban opt-in (open-sse/services/assistantPrefill.ts) - real booleans only.
+  if (
+    "requireUserLastMessage" in normalized &&
+    typeof normalized.requireUserLastMessage !== "boolean"
+  ) {
+    delete normalized.requireUserLastMessage;
+  }
+
   if ("preset" in normalized) {
     const preset = provider === "openrouter" ? normalizeOpenRouterPreset(normalized.preset) : null;
     if (preset) {
