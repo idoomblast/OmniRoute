@@ -369,12 +369,27 @@ export function openaiToClaudeRequest(
     // CRITICAL: tool_result must be in separate message immediately after tool_use
     let currentRole: string | undefined = undefined;
     let currentParts: ClaudeContentBlock[] = [];
+    let currentAssistantReasoning: string | undefined;
 
     const flushCurrentMessage = () => {
       if (currentRole && currentParts.length > 0) {
+        if (currentRole === "assistant") {
+          // Restore signed thinking on the assembled turn, not on each client
+          // fragment: a client may split [text] and [tool_calls] into two
+          // consecutive assistant messages, and the layout needs the full text.
+          applyAssistantThinkingContinuity({
+            blocks: currentParts,
+            msg: { reasoning_content: currentAssistantReasoning },
+            isKimiCoding,
+            thinkingEnabledForRequest,
+            thinkingTypeForRequest,
+            binding: thinkingBinding,
+          });
+        }
         result.messages.push({ role: currentRole, content: currentParts });
         currentParts = [];
       }
+      currentAssistantReasoning = undefined;
     };
 
     // tool_use ids of the latest assistant turn still waiting for a result; an id-less
@@ -398,6 +413,18 @@ export function openaiToClaudeRequest(
     const ambiguousToolUseIds = new Set(
       [...toolUseIdCounts.entries()].filter(([, n]) => n > 1).map(([id]) => id)
     );
+    const thinkingBinding = {
+      provider: routedProvider,
+      model,
+      disabled: credentials?._videoTranscriptSensitive === true,
+      ambiguousToolUseIds,
+      connectionId:
+        typeof credentials?._connectionId === "string" ? credentials._connectionId : undefined,
+    };
+    const thinkingTypeForRequest =
+      result.thinking && typeof result.thinking.type === "string"
+        ? result.thinking.type
+        : undefined;
 
     for (const msg of nonSystemMessages) {
       const newRole = msg.role === "user" || msg.role === "tool" ? "user" : "assistant";
@@ -405,22 +432,14 @@ export function openaiToClaudeRequest(
         msg,
         toolNameMap,
         disableToolPrefix,
-        thinkingEnabledForRequest,
-        isKimiCoding,
-        {
-          provider: routedProvider,
-          model,
-          disabled: credentials?._videoTranscriptSensitive === true,
-          ambiguousToolUseIds,
-          connectionId:
-            typeof credentials?._connectionId === "string" ? credentials._connectionId : undefined,
-        },
-        pendingToolUseIds,
-        result.thinking && typeof result.thinking.type === "string"
-          ? result.thinking.type
-          : undefined
+        pendingToolUseIds
       );
       if (newRole === "assistant") {
+        if (typeof msg.reasoning_content === "string") {
+          currentAssistantReasoning = currentAssistantReasoning
+            ? `${currentAssistantReasoning}\n${msg.reasoning_content}`
+            : msg.reasoning_content;
+        }
         pendingToolUseIds = blocks.filter((b) => b.type === "tool_use").map((b) => String(b.id));
       }
       const hasToolUse = blocks.some((b) => b.type === "tool_use");
@@ -650,17 +669,7 @@ function getContentBlocksFromMessage(
   msg,
   toolNameMap = new Map(),
   disableToolPrefix = false,
-  thinkingEnabledForRequest = false,
-  isKimiCoding = false,
-  thinkingBinding: {
-    provider?: unknown;
-    model?: unknown;
-    disabled?: boolean;
-    connectionId?: unknown;
-    ambiguousToolUseIds?: Set<string>;
-  } = {},
-  pendingToolUseIds: string[] = [],
-  thinkingTypeForRequest: string | undefined = undefined
+  pendingToolUseIds: string[] = []
 ) {
   const blocks: ClaudeContentBlock[] = [];
 
@@ -826,20 +835,6 @@ function getContentBlocksFromMessage(
         }
       }
     }
-
-    // Signed-thinking continuity (and the legacy reasoning placeholder) live in a
-    // helper to keep this translator inside its frozen line budget.
-    applyAssistantThinkingContinuity({
-      blocks,
-      msg,
-      isKimiCoding,
-      thinkingEnabledForRequest,
-      thinkingTypeForRequest,
-      binding: thinkingBinding,
-    });
-    // A store miss injects nothing: adaptive thinking has no precursor requirement, and
-    // prepareClaudeRequest disables manual thinking when the final tool turn has no
-    // genuine block.
   }
 
   return blocks;

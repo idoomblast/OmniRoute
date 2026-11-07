@@ -263,6 +263,33 @@ test("#17324: a thinking block stored on one connection is NOT restored on anoth
   );
 });
 
+test("#17324: manual thinking restores on its own connection but never on another", () => {
+  // Manual thinking (type:"enabled") is the branch that actually restores signed
+  // blocks; adaptive-only models skip it entirely, so this is the positive control
+  // for the connection binding.
+  streamClaudeToChat(claudeToolTurnEvents(), "claude", "conn-manual-a");
+
+  const foreignTurn = assistantTurn(
+    translateChatTurn(chatHistory(), { connectionId: "conn-manual-b" })
+  );
+  assert.equal(
+    foreignTurn.content.some(
+      (block) => block.type === "thinking" || block.type === "redacted_thinking"
+    ),
+    false,
+    "a turn stored on another connection is not replayed"
+  );
+
+  const ownTurn = assistantTurn(
+    translateChatTurn(chatHistory(), { connectionId: "conn-manual-a" })
+  );
+  assert.deepEqual(stripCacheControl(ownTurn.content[0]), {
+    type: "thinking",
+    thinking: THINKING_TEXT,
+    signature: SIGNATURE,
+  });
+});
+
 test("#17324: entries stored without connection info restore only when the replay is unbound too", () => {
   // Legacy/unknown provenance (no connectionId threaded): the entry stores "".
   streamClaudeToChat(claudeToolTurnEvents(), "claude", undefined);

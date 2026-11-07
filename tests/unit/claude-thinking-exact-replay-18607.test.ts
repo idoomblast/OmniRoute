@@ -135,7 +135,7 @@ test("#18607(a): restored blocks keep their original content index", () => {
   clearClaudeThinkingStore();
 });
 
-test("#18607(b): a turn the client split into [text] + [tool_calls] messages replays each block once, before its own tool_use", () => {
+test("#18607(b): a turn the client split into [text] + [tool_calls] messages replays the original layout", () => {
   captureInterleavedTurn();
   const [turn] = translate([
     { role: "assistant", content: "Reading A" },
@@ -143,16 +143,14 @@ test("#18607(b): a turn the client split into [text] + [tool_calls] messages rep
   ]);
   assert.deepEqual(
     turn.map(stripToolUse).map(digest),
-    // shortcut: text that lives in another fragment stays where the client put it,
-    // upgrade when a client is seen splitting text away from its tool_calls.
     [
-      { type: "text", text: "Reading A" },
       T1,
+      { type: "text", text: "Reading A" },
       { type: "tool_use", id: "toolu_A" },
       T2,
       { type: "tool_use", id: "toolu_B" },
     ].map(digest),
-    "merged fragments: every signed block once, directly before the tool_use it preceded"
+    "fragments are assembled before restoration, so [thinking, text, tool_use, redacted, tool_use] survives"
   );
   clearClaudeThinkingStore();
 });

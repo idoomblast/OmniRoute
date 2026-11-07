@@ -152,6 +152,11 @@ test("streaming capture keeps text boundaries when the client opted into the </t
     [`</think>${FIRST}`, SECOND],
     "marker belongs to the first client-visible text block; genuine text is untouched"
   );
+  assert.deepEqual(
+    turn.filter((block) => block.type === "thinking" || block.type === "redacted_thinking"),
+    [T1, T2],
+    "restored signed blocks keep their signatures and opaque data in marker mode"
+  );
   assert.equal(
     turn
       .filter((block) => block.type === "text")
@@ -182,6 +187,55 @@ test("non-streaming translation replays original text boundaries after concatena
   assert.equal(clientResponse.choices[0].message.content, `${FIRST}${SECOND}`);
 
   const turn = replay(clientResponse.choices[0].message.content);
+  assert.deepEqual(turn.map(stripToolUse), expected());
+  clearClaudeThinkingStore();
+});
+
+test("non-streaming capture with a fragmented client turn replays the original layout", () => {
+  clearClaudeThinkingStore();
+  const clientResponse = translateNonStreamingResponse(
+    {
+      id: "msg_ns_split",
+      type: "message",
+      role: "assistant",
+      model: MODEL,
+      stop_reason: "tool_use",
+      content: claudeContent(),
+      usage: { input_tokens: 10, output_tokens: 20 },
+    },
+    FORMATS.CLAUDE,
+    FORMATS.OPENAI,
+    null,
+    { provider: "claude", model: MODEL, connectionId: CONN }
+  ) as { choices: Array<{ message: { content: string } }> };
+  const content = clientResponse.choices[0].message.content;
+  const translated = translateRequest(
+    FORMATS.OPENAI,
+    FORMATS.CLAUDE,
+    MODEL,
+    {
+      reasoning_effort: "high",
+      messages: [
+        { role: "user", content: "Synthetic task" },
+        { role: "assistant", content },
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            { id: TOOL_ID, type: "function", function: { name: "read", arguments: "{}" } },
+          ],
+        },
+        { role: "tool", tool_call_id: TOOL_ID, content: "ok" },
+      ],
+      tools: [{ type: "function", function: { name: "read", parameters: { type: "object" } } }],
+    },
+    false,
+    { _connectionId: CONN },
+    "claude"
+  ) as { messages: Array<{ role: string; content: Array<Record<string, unknown>> }> };
+  const [turn] = translated.messages
+    .filter((message) => message.role === "assistant")
+    .map((message) => message.content.map(({ cache_control: _c, ...block }) => block));
   assert.deepEqual(turn.map(stripToolUse), expected());
   clearClaudeThinkingStore();
 });
