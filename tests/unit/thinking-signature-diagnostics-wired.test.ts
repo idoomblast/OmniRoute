@@ -52,6 +52,7 @@ test("failed signature recovery emits the production THINKING_SIGNATURE diagnost
   assert.equal(events.length, 1, "one diagnostic event per attempted recovery");
   assert.equal(events[0].tag, "THINKING_SIGNATURE");
   assert.equal(events[0].payload.correlationId, "00000000-0000-4000-8000-000000000000");
+  assert.equal(events[0].payload.model, "claude");
   assert.equal(events[0].payload.recoveryAttempted, true);
 });
 

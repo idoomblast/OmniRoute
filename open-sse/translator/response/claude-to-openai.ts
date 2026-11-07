@@ -174,9 +174,13 @@ export function claudeToOpenAIResponse(chunk, state) {
     case "content_block_delta": {
       const delta = chunk.delta;
       if (delta?.type === "text_delta" && delta.text) {
+        // Client-visible length includes the synthetic </think> marker when this
+        // request opted in: replay compares against client history, not upstream text.
+        const markerLength =
+          state.pendingThinkClose && !state.suppressThinkClose ? "</think>".length : 0;
         textLengthsOf(state).set(
           chunk.index,
-          (textLengthsOf(state).get(chunk.index) ?? 0) + delta.text.length
+          (textLengthsOf(state).get(chunk.index) ?? 0) + delta.text.length + markerLength
         );
         // Flush the deferred </think> close marker before the first text delta so
         // clients like Claude Code / Cursor (that scan content for </think>) see it

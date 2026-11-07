@@ -3617,6 +3617,7 @@ export async function handleChatCore({
 
     const signatureRecovery = await recoverAnthropicThinkingSignature({
       provider,
+      model: currentModel,
       statusCode,
       message,
       body: translatedBody,

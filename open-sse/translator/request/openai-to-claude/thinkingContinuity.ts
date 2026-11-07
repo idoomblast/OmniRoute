@@ -87,8 +87,12 @@ export function applyAssistantThinkingContinuity(args: {
         ),
       0
     );
+    const signedTokenCount = (segment: (typeof ownSegments)[number]) =>
+      (segment?.layout ?? []).filter((token) => token.kind === "signed").length;
     const canRebuildLayout =
-      ownSegments.every((segment) => segment?.layout != null) &&
+      ownSegments.every(
+        (segment) => segment?.layout != null && signedTokenCount(segment) === segment.blocks.length
+      ) &&
       blocks.every((b) => b.type === "text" || b.type === "tool_use") &&
       expectedTextLength === contentText.length;
     if (canRebuildLayout) {
@@ -97,9 +101,13 @@ export function applyAssistantThinkingContinuity(args: {
       for (const block of blocks) {
         if (block.type === "text") continue;
         const segment = segmentById.get(String(block.id));
+        let signedIndex = 0;
         for (const token of segment?.layout ?? []) {
           if (token.kind === "signed") {
-            rebuilt.push({ ...token.block });
+            // Use the object from segment.blocks: the store tagged those clones in
+            // its restored-block WeakSet, and request preparation drops untagged
+            // signed-empty blocks as foreign history.
+            rebuilt.push(segment?.blocks[signedIndex++] ?? token.block);
           } else if (token.length > 0) {
             rebuilt.push({ type: "text", text: contentText.slice(offset, offset + token.length) });
             offset += token.length;

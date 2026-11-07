@@ -32,12 +32,13 @@ function claudeContent() {
   ];
 }
 
-function captureStreamingTurn() {
+function captureStreamingTurn(marker = false) {
   clearClaudeThinkingStore();
   const state: Record<string, unknown> = {
     provider: "claude",
     connectionId: CONN,
     toolCalls: new Map(),
+    suppressThinkClose: !marker,
   };
   const events = [
     { type: "message_start", message: { id: "msg_text", model: MODEL } },
@@ -79,7 +80,14 @@ function captureStreamingTurn() {
     { type: "message_delta", delta: { stop_reason: "tool_use" }, usage: { output_tokens: 5 } },
     { type: "message_stop" },
   ];
-  for (const event of events) claudeToOpenAIResponse(event, state);
+  let clientContent = "";
+  for (const event of events) {
+    const chunks = claudeToOpenAIResponse(event, state) as Array<{
+      choices?: Array<{ delta?: { content?: string } }>;
+    }>;
+    for (const chunk of chunks ?? []) clientContent += chunk.choices?.[0]?.delta?.content ?? "";
+  }
+  return clientContent;
 }
 
 function replay(content: string) {
@@ -124,9 +132,33 @@ const stripToolUse = (block: Record<string, unknown>) =>
   block.type === "tool_use" ? { type: "tool_use", id: block.id } : block;
 
 test("streaming capture replays thinking blocks around both text blocks", () => {
-  captureStreamingTurn();
-  const turn = replay(`${FIRST}${SECOND}`);
+  const content = captureStreamingTurn(false);
+  assert.equal(content, `${FIRST}${SECOND}`);
+  const turn = replay(content);
   assert.deepEqual(turn.map(stripToolUse), expected());
+  clearClaudeThinkingStore();
+});
+
+test("streaming capture keeps text boundaries when the client opted into the </think> marker", () => {
+  const content = captureStreamingTurn(true);
+  assert.equal(content, `</think>${FIRST}${SECOND}`);
+  const turn = replay(content);
+  assert.deepEqual(
+    turn.map((block) => block.type),
+    ["thinking", "text", "redacted_thinking", "text", "tool_use"]
+  );
+  assert.deepEqual(
+    turn.filter((block) => block.type === "text").map((block) => block.text),
+    [`</think>${FIRST}`, SECOND],
+    "marker belongs to the first client-visible text block; genuine text is untouched"
+  );
+  assert.equal(
+    turn
+      .filter((block) => block.type === "text")
+      .map((block) => block.text)
+      .join(""),
+    content
+  );
   clearClaudeThinkingStore();
 });
 
