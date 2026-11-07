@@ -118,6 +118,11 @@ import { sanitizeReasoningEffortForProvider } from "./base/reasoningEffort.ts";
 // Reasoning-effort sanitation extracted to a pure leaf; re-exported for external
 // importers (mimoThinking service + tests) that import it from "./base.ts".
 export { sanitizeReasoningEffortForProvider } from "./base/reasoningEffort.ts";
+import { applyMaxTokensRecovery } from "./base/maxTokensRecovery.ts";
+import {
+  clampTopLevelMaxTokens,
+  getLearnedMaxTokensCap,
+} from "../services/learnedMaxTokensCaps.ts";
 
 /**
  * Sanitizes a custom API path to prevent path traversal attacks.
@@ -826,6 +831,9 @@ export class BaseExecutor {
     // loop. The learned cap is also recorded process-wide via
     // recordLearnedThinkingCap so future requests skip the 400 entirely.
     let thinkingBudgetClampedMax: number | null = null;
+    // Set by the max_tokens ceiling 400 clamp-and-retry below: fires at most
+    // once per execute() so a persistent 400 cannot loop.
+    let maxTokensCeilingRecovered = false;
 
     for (let urlIndex = 0; urlIndex < fallbackCount; urlIndex++) {
       const requestCredentials = withForcedResponsesUpstream(
@@ -881,6 +889,15 @@ export class BaseExecutor {
         model,
         log
       );
+      // Learned max_tokens ceiling (recorded from an earlier 400 advertising
+      // one): pre-clamp with zero extra round-trips. No-op when nothing was
+      // learned for this provider/model.
+      {
+        const learnedMaxTokensCap = getLearnedMaxTokensCap(this.provider, model);
+        if (learnedMaxTokensCap !== null) {
+          clampTopLevelMaxTokens(transformedBody, learnedMaxTokensCap);
+        }
+      }
       if (this.provider === "groq") {
         transformedBody = stripGroqUnsupportedFields(
           transformedBody as Record<string, unknown>
@@ -1482,6 +1499,39 @@ export class BaseExecutor {
               response = await fetchWithStartTimeout(url, { ...fetchOptions, body: retryBody });
             }
           }
+        }
+
+        // max_tokens ceiling 400 clamp-and-retry: parse the upstream-advertised
+        // ceiling ("expected a value <= N"), clamp (squeezing a Claude-style
+        // thinking budget so budget_tokens < max_tokens), record it process-wide
+        // for the proactive pre-clamp above, and retry the same URL once.
+        if (
+          (response.status === HTTP_STATUS.BAD_REQUEST ||
+            response.status === HTTP_STATUS.UNPROCESSABLE_ENTITY) &&
+          !maxTokensCeilingRecovered &&
+          transformedBody &&
+          typeof transformedBody === "object"
+        ) {
+          const recovery = await applyMaxTokensRecovery({
+            response,
+            url,
+            provider: this.provider,
+            model,
+            body: transformedBody,
+            fetchOptions,
+            fetchFn: fetchWithStartTimeout,
+            serializeBody: async (retryPayload: unknown) => {
+              let serialized = JSON.stringify(retryPayload);
+              if (isClaudeCodeCompatible(this.provider) || this.provider === "claude") {
+                serialized = await signRequestBody(serialized);
+              }
+              return serialized;
+            },
+            log,
+          });
+          if (recovery.attempted) maxTokensCeilingRecovered = true;
+          response = recovery.response;
+          transformedBody = recovery.body;
         }
 
         // Generic reactive 400 field-downgrade; each field is stripped at most once.
