@@ -96,6 +96,7 @@ import {
   stripProxyToolPrefix,
 } from "./claudeIdentity.ts";
 import { withForcedResponsesUpstream } from "./forceResponsesUpstream.ts";
+import { detachClaudeCodeRewriteTargets } from "./claudeOauthBodyIsolation.ts";
 import {
   mergeUpstreamExtraHeaders,
   setUserAgentHeader,
@@ -965,7 +966,7 @@ export class BaseExecutor {
           transformedBody !== null
         ) {
           const tb = transformedBody as Record<string, unknown>;
-
+          detachClaudeCodeRewriteTargets(tb);
           stripProxyToolPrefix(tb);
           remapToolNamesInRequest(tb);
           // Cloak third-party tool names + sanitize invalid tool schemas so
