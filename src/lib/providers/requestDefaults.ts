@@ -201,6 +201,15 @@ export function normalizeProviderSpecificData(
     delete normalized.disableCooling;
   }
 
+  // Claude OAuth usage-wall opt-ins (open-sse/services/claudeLowPriority.ts) — only
+  // persist real booleans; both default to off when absent.
+  if ("lowPriorityMode" in normalized && typeof normalized.lowPriorityMode !== "boolean") {
+    delete normalized.lowPriorityMode;
+  }
+  if ("autoLimitReset" in normalized && typeof normalized.autoLimitReset !== "boolean") {
+    delete normalized.autoLimitReset;
+  }
+
   if ("autoFetchModels" in normalized && typeof normalized.autoFetchModels !== "boolean") {
     delete normalized.autoFetchModels;
   }

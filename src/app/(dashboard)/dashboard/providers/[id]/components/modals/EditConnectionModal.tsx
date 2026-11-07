@@ -19,7 +19,6 @@ import { maskEmail } from "@/shared/utils/maskEmail";
 import useEmailPrivacyStore from "@/store/emailPrivacyStore";
 import { useNotificationStore } from "@/store/notificationStore";
 import { type CodexServiceTier } from "@/lib/providers/requestDefaults";
-import { isClaudeExtraUsageBlockEnabled } from "@/lib/providers/claudeExtraUsage";
 import { resolveDashboardProviderInfo } from "../../../providerPageUtils";
 import {
   isBaseUrlConfigurableProvider,
@@ -52,6 +51,8 @@ import { useOpenRouterPresetControl } from "../OpenRouterPresetInput";
 import WebSessionCredentialGuide from "../WebSessionCredentialGuide";
 import AdvancedConnectionToggles from "./AdvancedConnectionToggles";
 import CcCompatibleRequestDefaultsFields from "./CcCompatibleRequestDefaultsFields";
+import ClaudeConnectionFields from "./ClaudeConnectionFields";
+import { claudeConnectionFieldPatch, claudeConnectionFieldValues } from "./claudeConnectionFields";
 import {
   anthropicToggleDefaults,
   assignAnthropicCompatibleToggles,
@@ -141,10 +142,7 @@ export default function EditConnectionModal({
     ccCompatibleSummarizeThinking: false,
     cloudCodeProjectId: "",
     antigravityClientProfile: "ide",
-    blockExtraUsage:
-      provider === "claude"
-        ? isClaudeExtraUsageBlockEnabled(provider, connectionProviderSpecificData)
-        : false,
+    ...claudeConnectionFieldValues(provider, connectionProviderSpecificData),
     passthroughModels: connectionProviderSpecificData?.passthroughModels === true,
     disableCooling: connectionProviderSpecificData?.disableCooling === true,
     ...anthropicToggleDefaults(connectionProviderSpecificData),
@@ -333,10 +331,7 @@ export default function EditConnectionModal({
         antigravityClientProfile: normalizeAntigravityClientProfileSetting(
           connection.providerSpecificData?.clientProfile
         ),
-        blockExtraUsage: isClaudeExtraUsageBlockEnabled(
-          effectiveProvider,
-          connection.providerSpecificData
-        ),
+        ...claudeConnectionFieldValues(effectiveProvider, connection.providerSpecificData),
         passthroughModels: connection?.providerSpecificData?.passthroughModels === true,
         disableCooling: connection?.providerSpecificData?.disableCooling === true,
         ...anthropicToggleDefaults(connection?.providerSpecificData),
@@ -576,7 +571,7 @@ export default function EditConnectionModal({
           excludedModels: parseExcludedModelsInput(formData.excludedModels),
         };
         if (isClaude) {
-          updates.providerSpecificData.blockExtraUsage = formData.blockExtraUsage;
+          Object.assign(updates.providerSpecificData, claudeConnectionFieldPatch(formData));
         }
         if (isCodex) {
           updates.providerSpecificData.requestDefaults = {
@@ -708,14 +703,11 @@ export default function EditConnectionModal({
           </div>
         )}
         {isClaude && (
-          <div className="flex flex-col gap-4 rounded-lg border border-border/50 bg-surface/20 p-4">
-            <Toggle
-              checked={formData.blockExtraUsage}
-              onChange={(checked) => setFormData({ ...formData, blockExtraUsage: checked })}
-              label={t("blockClaudeExtraUsageLabel")}
-              description={t("blockClaudeExtraUsageDescription")}
-            />
-          </div>
+          <ClaudeConnectionFields
+            values={formData}
+            showUsageWallOptions={isOAuth}
+            onChange={(patch) => setFormData({ ...formData, ...patch })}
+          />
         )}
         {(isCcCompatible || openRouterPreset.input) && (
           <div className="flex flex-col gap-4 rounded-lg border border-border/50 bg-surface/20 p-4">
