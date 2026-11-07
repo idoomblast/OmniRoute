@@ -8,6 +8,7 @@ import {
   getClaudeCodeClientVersion,
   getClaudeCodeUserAgent,
 } from "@/shared/constants/claudeCodeClient";
+import { modelSupportsContext1mBeta } from "./context1m.ts";
 
 export const ANTHROPIC_VERSION_HEADER = "2023-06-01";
 
@@ -222,7 +223,7 @@ export function mergeClientAnthropicBeta(
   base: string,
   clientBeta: string | null | undefined,
   allow: readonly string[] = FORWARDABLE_CLIENT_BETAS,
-  _model?: string | null,
+  model?: string | null,
   body?: unknown
 ): string {
   const baseList = base
@@ -231,7 +232,15 @@ export function mergeClientAnthropicBeta(
     .filter(Boolean);
   if (typeof clientBeta !== "string" || !clientBeta.trim()) return baseList.join(",");
   const seen = new Set(baseList.map((s) => s.toLowerCase()));
-  const allowSet = new Set(allow.map((s) => s.toLowerCase()));
+  const allowSet = new Set(
+    allow
+      .map((s) => s.toLowerCase())
+      .filter((lower) => {
+        if (lower !== "context-1m-2025-08-07") return true;
+        if (model === undefined || model === null || model === "") return true;
+        return modelSupportsContext1mBeta(model);
+      })
+  );
   for (const token of clientBeta
     .split(",")
     .map((s) => s.trim())

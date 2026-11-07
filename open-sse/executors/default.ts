@@ -325,7 +325,7 @@ export class DefaultExecutor extends BaseExecutor {
     credentials,
     stream = true,
     clientHeaders?: Record<string, string> | null,
-    _model?: string,
+    model?: string | null,
     _health?: Record<string, unknown>,
     body?: unknown
   ) {
@@ -530,7 +530,10 @@ export class DefaultExecutor extends BaseExecutor {
           headers[betaKey] ?? "",
           clientBeta,
           allow,
-          null,
+          // Gate the client-negotiated context-1m beta on the RESOLVED target
+          // model: a combo/fallback can route a [1m] request onto a model that
+          // does not qualify (e.g. Haiku), which Anthropic rejects (#10119).
+          model,
           body
         );
       }
