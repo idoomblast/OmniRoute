@@ -59,6 +59,11 @@ import { signRequestBody } from "../services/claudeCodeCCH.ts";
 import { normalizeCacheControlTtl } from "../services/claudeCodeConstraints.ts";
 import { finalizeClaudeBodyConstraints } from "../services/claudeCodeCompatible.ts";
 import { applyContext1mBetaHeader } from "./base/context1mBeta.ts";
+import {
+  INTRA_RETRY_MAX_HINT_MS,
+  readRateLimitRetryHintMs,
+  shouldSkipIntraRetryFor429,
+} from "./rateLimitIntraRetry.ts";
 import { getClaudeCodeCompatibleRequestDefaults } from "@/lib/providers/requestDefaults";
 import {
   cloakThirdPartyToolNames,
@@ -595,6 +600,15 @@ export class BaseExecutor {
 
   // Intra-URL retry config: retry same URL before falling back to next node
   static readonly RETRY_CONFIG = { maxAttempts: 2, delayMs: 2000 };
+  /**
+   * Equal jitter for intra-URL retry backoff: returns a value in [base/2, base].
+   * Spreads concurrent retries over time so parallel requests hitting the same
+   * upstream throttle don't retry in lockstep (thundering herd). `random` is
+   * injectable for deterministic tests.
+   */
+  static jitterRetryDelayMs(baseMs: number, random: () => number = Math.random): number {
+    return Math.round(baseMs * (0.5 + random() * 0.5));
+  }
   // Timeout for receiving the initial upstream response headers. Once the response
   // starts streaming, STREAM_IDLE_TIMEOUT_MS / Undici bodyTimeout handle stalls.
   static FETCH_START_TIMEOUT_MS = FETCH_TIMEOUT_MS;
@@ -1539,19 +1553,32 @@ export class BaseExecutor {
           }
         }
 
-        // Intra-URL retry: if 429 and we haven't exhausted per-URL retries, wait and retry the same URL
+        // Intra-URL retry: if 429 and we haven't exhausted per-URL retries, wait and retry the same URL.
+        // Skipped when the 429 carries a retry hint longer than the retry window (Gemini free-tier
+        // RetryInfo "37s", Retry-After: 60): the same-account retries cannot succeed and only burn
+        // upstream calls before the caller rotates to the next account.
         if (
           !skipUpstreamRetry &&
           response.status === HTTP_STATUS.RATE_LIMITED &&
-          (retryAttemptsByUrl[urlIndex] ?? 0) < BaseExecutor.RETRY_CONFIG.maxAttempts
+          (retryAttemptsByUrl[urlIndex] ?? 0) < BaseExecutor.RETRY_CONFIG.maxAttempts &&
+          !(await shouldSkipIntraRetryFor429(response))
         ) {
           retryAttemptsByUrl[urlIndex] = (retryAttemptsByUrl[urlIndex] ?? 0) + 1;
           const attempt = retryAttemptsByUrl[urlIndex];
+          // Honor the upstream retry hint (Retry-After header / body) when it
+          // sits inside the intra-retry window — the skip guard above already
+          // dropped anything larger, so the wait is bounded by
+          // INTRA_RETRY_MAX_HINT_MS. Without a hint, jitter the fixed delay.
+          const hintMs = await readRateLimitRetryHintMs(response);
+          const waitMs =
+            hintMs !== null && hintMs <= INTRA_RETRY_MAX_HINT_MS
+              ? hintMs
+              : BaseExecutor.jitterRetryDelayMs(BaseExecutor.RETRY_CONFIG.delayMs);
           log?.debug?.(
             "RETRY",
-            `429 intra-retry ${attempt}/${BaseExecutor.RETRY_CONFIG.maxAttempts} on ${url} — waiting ${BaseExecutor.RETRY_CONFIG.delayMs}ms`
+            `429 intra-retry ${attempt}/${BaseExecutor.RETRY_CONFIG.maxAttempts} on ${url} — waiting ${waitMs}ms${hintMs !== null ? " (upstream hint)" : ""}`
           );
-          await new Promise((resolve) => setTimeout(resolve, BaseExecutor.RETRY_CONFIG.delayMs));
+          await new Promise((resolve) => setTimeout(resolve, waitMs));
           urlIndex--; // re-run this urlIndex on the next loop iteration
           continue;
         }
