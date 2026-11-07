@@ -434,14 +434,6 @@ export function openaiToClaudeRequest(
         disableToolPrefix,
         pendingToolUseIds
       );
-      if (newRole === "assistant") {
-        if (typeof msg.reasoning_content === "string") {
-          currentAssistantReasoning = currentAssistantReasoning
-            ? `${currentAssistantReasoning}\n${msg.reasoning_content}`
-            : msg.reasoning_content;
-        }
-        pendingToolUseIds = blocks.filter((b) => b.type === "tool_use").map((b) => String(b.id));
-      }
       const hasToolUse = blocks.some((b) => b.type === "tool_use");
       const hasToolResult = blocks.some((b) => b.type === "tool_result");
 
@@ -466,6 +458,18 @@ export function openaiToClaudeRequest(
       if (currentRole !== newRole) {
         flushCurrentMessage();
         currentRole = newRole;
+      }
+
+      if (newRole === "assistant") {
+        // Accumulate after the role transition: flushing the previous turn
+        // clears the accumulator, so doing this earlier would drop the first
+        // assistant fragment's Kimi reasoning_content.
+        if (typeof msg.reasoning_content === "string") {
+          currentAssistantReasoning = currentAssistantReasoning
+            ? `${currentAssistantReasoning}\n${msg.reasoning_content}`
+            : msg.reasoning_content;
+        }
+        pendingToolUseIds = blocks.filter((b) => b.type === "tool_use").map((b) => String(b.id));
       }
 
       currentParts.push(...blocks);

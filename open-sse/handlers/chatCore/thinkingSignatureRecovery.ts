@@ -91,6 +91,25 @@ export async function recoverAnthropicThinkingSignature(args: {
   });
 
   if (!recovery.retried) {
+    // The failure is recognized, but no safe rewrite exists (for example a
+    // manual-thinking turn whose only signed block is client-supplied). Emit the
+    // structural event with recoveryAttempted:false so incident logs still see it.
+    emitThinkingSignatureDiagnostics(
+      {
+        correlationId: args.diagnostics?.correlationId ?? null,
+        provider: args.provider,
+        model: args.model,
+        status: args.statusCode,
+        message: args.message,
+        ingressBody: args.body,
+        outboundBody: null,
+        recoveryAttempted: false,
+        recoverySucceeded: false,
+        outboundBodyCaptured: false,
+      },
+      args.diagnostics?.noLog === true,
+      args.diagnostics?.log ?? null
+    );
     return {
       attempted: false,
       succeeded: false,

@@ -56,6 +56,37 @@ test("failed signature recovery emits the production THINKING_SIGNATURE diagnost
   assert.equal(events[0].payload.recoveryAttempted, true);
 });
 
+test("recognized failure with no safe retry still emits a diagnostic", async () => {
+  const events: Array<{ tag: string; payload: Record<string, unknown> }> = [];
+  const result = await recoverAnthropicThinkingSignature({
+    provider: "claude",
+    model: "claude-sonnet-4-5",
+    statusCode: 400,
+    message:
+      "thinking or redacted_thinking blocks in the latest assistant message cannot be modified",
+    // A history with no assistant thinking block leaves no safe rewrite.
+    body: { messages: [{ role: "user", content: "hello" }] },
+    execute: async () => ({ response: new Response("{}", { status: 400 }) }),
+    parseError: async () => ({
+      statusCode: 400,
+      message: "cannot be modified",
+      retryAfterMs: null,
+      responseBody: {},
+    }),
+    diagnostics: {
+      correlationId: "00000000-0000-4000-8000-000000000001",
+      noLog: false,
+      log: {
+        warn: (tag: string, message: string) => events.push({ tag, payload: JSON.parse(message) }),
+      },
+    },
+  });
+  assert.equal(result.attempted, false);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].payload.recoveryAttempted, false);
+  assert.equal(events[0].payload.outboundBodyCaptured, false);
+});
+
 test("recovery respects noLog by emitting nothing", async () => {
   const events: unknown[] = [];
   await recoverAnthropicThinkingSignature({
