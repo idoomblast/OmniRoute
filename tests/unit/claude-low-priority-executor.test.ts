@@ -204,6 +204,45 @@ test("a wall 429 that only surfaces after a 400-driven intra-attempt retry is st
   }
 });
 
+test("a limit reset that does not clear the wall is retried at most 3 times", async () => {
+  // The claim reports success but the upstream wall persists: the reset memo then answers
+  // `recent_reset` for 60s. Without a cap the executor would keep retrying the same 429 in
+  // a tight loop, because this path bypasses retryAttemptsByUrl.
+  const claimUrl = "https://api.anthropic.com/api/organizations/org-uuid-2/reset_rate_limits";
+  let statusHits = 0;
+  let claimHits = 0;
+  const { calls, restore } = mockFetch([() => wall429()], {
+    [CLAUDE_LIMIT_RESET_STATUS_URL]: () => {
+      statusHits++;
+      return new Response(
+        JSON.stringify({
+          juniper_tide: { eligible: true, in_experiment: true, arm: "reset", available: true },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    },
+    [claimUrl]: () => {
+      claimHits++;
+      return new Response(JSON.stringify({ result: "reset", next_available_at: null }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+  });
+  try {
+    const result = await run("conn-reset-persists", {
+      autoLimitReset: true,
+      organizationUUID: "org-uuid-2",
+    });
+    assert.equal(result.response.status, 429, "the persistent wall is surfaced, not hidden");
+    assert.equal(calls.length, 4, "1 initial attempt + 3 bounded retries");
+    assert.equal(statusHits, 1);
+    assert.equal(claimHits, 1, "the reset memo prevents re-claiming inside its window");
+  } finally {
+    restore();
+  }
+});
+
 test("wall 429 + autoLimitReset → status + claim, then full-speed retry without the slow header", async () => {
   const claimUrl = "https://api.anthropic.com/api/organizations/org-uuid-1/reset_rate_limits";
   const hits: string[] = [];

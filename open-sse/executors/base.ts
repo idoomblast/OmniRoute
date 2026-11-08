@@ -734,6 +734,11 @@ export class BaseExecutor {
     const retryAttemptsByUrl: Record<number, number> = {};
     // Claude OAuth usage wall (opt-in per connection): see ./claudeUsageLimit.ts.
     const claudeUsageLimit = new ClaudeUsageLimitGuard(this.provider, log);
+    // Wall retries (lane accept / limit reset) are immediate and do not go through
+    // retryAttemptsByUrl. Cap them: a claim that reports success while the wall persists
+    // (the reset memo then answers `recent_reset` for 60s) must not spin on the same 429.
+    const CLAUDE_USAGE_LIMIT_MAX_RETRIES = 3;
+    let claudeUsageLimitRetries = 0;
 
     if (this.needsRefresh(credentials)) {
       try {
@@ -1541,13 +1546,16 @@ export class BaseExecutor {
         // session-limit reset and retry the SAME account instead of surfacing the 429
         // (which would cool the connection down). Runs AFTER every 400-driven retry
         // above so it classifies the FINAL response of this attempt.
-        const claudeRetry = await claudeUsageLimit.shouldRetry(response, url, {
-          credentials: activeCredentials,
-          signal,
-          budgetMs: fetchStartTimeoutMs,
-          sentSlow: claudeSentSlow,
-        });
+        const claudeRetry =
+          claudeUsageLimitRetries < CLAUDE_USAGE_LIMIT_MAX_RETRIES &&
+          (await claudeUsageLimit.shouldRetry(response, url, {
+            credentials: activeCredentials,
+            signal,
+            budgetMs: fetchStartTimeoutMs,
+            sentSlow: claudeSentSlow,
+          }));
         if (claudeRetry) {
+          claudeUsageLimitRetries++;
           urlIndex--; // re-run this urlIndex (header injection sees the new lane state)
           continue;
         }
