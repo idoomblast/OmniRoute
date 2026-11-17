@@ -34,7 +34,6 @@ import type { ProviderTransformsConfig, TransformOp } from "./systemTransforms.t
 /** Provider key used by the settings UI / config for this executor. */
 export const PROVIDER_ANTIGRAVITY = "antigravity";
 
-type TransformTarget = "system" | "messages" | "tools";
 type TextHolder = { text?: unknown; [key: string]: unknown };
 
 interface TargetSelection {
@@ -53,16 +52,21 @@ function resolveConfig(providerId: string): ProviderTransformsConfig | undefined
 }
 
 /**
- * Explicit `targets` are honoured verbatim. Without one, the Antigravity
- * default is system-only: rewriting conversation text is destructive and was
- * never the intent of this bridge, so `messages` must be opted into.
+ * Explicit `targets` are honoured verbatim, including an explicitly empty list
+ * (which selects nothing). Only a missing/non-array value falls back to the
+ * Antigravity default of system-only: rewriting conversation text is
+ * destructive and was never the intent of this bridge.
  */
 function resolveTargets(op: TransformOp): TargetSelection {
-  const explicit = (op as { targets?: TransformTarget[] }).targets;
-  if (!Array.isArray(explicit) || explicit.length === 0) {
+  const raw = (op as { targets?: unknown }).targets;
+  if (raw === undefined || raw === null) {
     return { system: true, contents: false };
   }
-  return { system: explicit.includes("system"), contents: explicit.includes("messages") };
+  if (!Array.isArray(raw)) {
+    // Malformed config: select nothing rather than guessing a scope.
+    return { system: false, contents: false };
+  }
+  return { system: raw.includes("system"), contents: raw.includes("messages") };
 }
 
 /**
@@ -140,24 +144,41 @@ function obfuscateWord(word: string): string {
   return word[0] + ZWJ + word.slice(1);
 }
 
+/**
+ * Replacement strings are interpolated, not just compared: a non-string value
+ * (e.g. an object whose `toString` is null) throws from `String.prototype.replace`
+ * and would abort the whole request. Reject anything that is not a string.
+ * An omitted replacement keeps the DSL's empty-string default.
+ */
+function readReplacement(value: unknown): string | null {
+  if (value === undefined) return "";
+  return typeof value === "string" ? value : null;
+}
+
 function buildTextTransform(op: TransformOp): ((text: string) => string) | null {
   switch (op.kind) {
     case "replace_text": {
-      if (!op.match) return null;
-      const replacement = op.replacement ?? "";
+      const match = op.match;
+      if (typeof match !== "string" || match.length === 0) return null;
+      const replacement = readReplacement(op.replacement);
+      if (replacement === null) return null;
       const all = op.allOccurrences === true;
       return (text) =>
-        all ? text.split(op.match).join(replacement) : text.replace(op.match, replacement);
+        all ? text.split(match).join(replacement) : text.replace(match, replacement);
     }
     case "replace_regex": {
-      if (!op.pattern) return null;
-      const replacement = op.replacement ?? "";
+      const pattern = op.pattern;
+      if (typeof pattern !== "string" || pattern.length === 0) return null;
+      const flags = op.flags === undefined ? "u" : op.flags;
+      if (typeof flags !== "string") return null;
+      const replacement = readReplacement(op.replacement);
+      if (replacement === null) return null;
       // Parity with the generic DSL (ccBridgeTransforms.ts applyReplaceRegex):
       // supplied flags are used verbatim and `u` is the default. Never inject
       // `g` — that would turn a first-occurrence rule into a global rewrite.
       let regex: RegExp;
       try {
-        regex = new RegExp(op.pattern, op.flags ?? "u");
+        regex = new RegExp(pattern, flags);
       } catch {
         return null;
       }
@@ -211,7 +232,13 @@ export function applyAntigravitySystemTransforms(
     const selection = resolveTargets(op);
     if (selection.contents) result.targetedMessages = true;
     if (!selection.system && !selection.contents) continue;
-    if (applyToRequest(request, selection, transform)) result.appliedOpKinds.push(op.kind);
+    // Config can arrive through the runtime setter, not only the validated
+    // settings API. A single bad op must never abort the request.
+    try {
+      if (applyToRequest(request, selection, transform)) result.appliedOpKinds.push(op.kind);
+    } catch {
+      continue;
+    }
   }
 
   return result;

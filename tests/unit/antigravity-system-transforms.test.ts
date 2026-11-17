@@ -15,6 +15,7 @@ import {
   applyAntigravitySystemTransforms,
   PROVIDER_ANTIGRAVITY,
 } from "../../open-sse/services/antigravitySystemTransforms.ts";
+import { AntigravityExecutor } from "../../open-sse/executors/antigravity.ts";
 import {
   resetSystemTransformsConfig,
   setSystemTransformsConfig,
@@ -320,4 +321,154 @@ test("a schema-parsed config is applied by the bridge end to end", () => {
 
   assert.equal(req.systemInstruction.parts[0].text, "You are Hermes Agent");
   assert.equal(req.contents[0].parts[0].text, "find H3rm3s source");
+});
+
+test("an explicitly empty targets list selects nothing (all op kinds)", () => {
+  const pipeline = [
+    { kind: "replace_text", match: "Hermes", replacement: "X", allOccurrences: true, targets: [] },
+    { kind: "replace_regex", pattern: "Hermes", flags: "g", replacement: "X", targets: [] },
+    { kind: "obfuscate_words", words: ["Hermes"], targets: [] },
+  ];
+  enableAntigravity(pipeline);
+
+  const req = geminiRequest("You are Hermes Agent", "find Hermes source");
+  const before = JSON.stringify(req);
+
+  const result = applyAntigravitySystemTransforms(req);
+
+  assert.deepEqual(result.appliedOpKinds, []);
+  assert.equal(result.targetedMessages, false);
+  assert.equal(JSON.stringify(req), before);
+});
+
+test("schema-parsed empty targets still select nothing", () => {
+  const parsed = updateSettingsSchema.parse({
+    systemTransforms: {
+      providers: {
+        [PROVIDER_ANTIGRAVITY]: {
+          enabled: true,
+          pipeline: [
+            {
+              kind: "replace_text",
+              match: "Hermes",
+              replacement: "X",
+              allOccurrences: true,
+              targets: [],
+            },
+          ],
+        },
+      },
+    },
+  });
+  setSystemTransformsConfig(parsed.systemTransforms);
+
+  const req = geminiRequest("You are Hermes Agent", "find Hermes source");
+  const before = JSON.stringify(req);
+
+  applyAntigravitySystemTransforms(req);
+
+  assert.equal(JSON.stringify(req), before);
+});
+
+test("non-string replacement fields are skipped instead of throwing", () => {
+  const poison = { toString: null };
+  enableAntigravity([
+    { kind: "replace_text", match: "Hermes", replacement: poison, allOccurrences: true },
+    { kind: "replace_text", match: "Hermes", replacement: poison },
+    { kind: "replace_text", match: poison, replacement: "X" },
+    { kind: "replace_regex", pattern: "Hermes", flags: "g", replacement: poison },
+  ]);
+
+  const req = geminiRequest("You are Hermes Agent");
+
+  const result = applyAntigravitySystemTransforms(req);
+
+  assert.deepEqual(result.appliedOpKinds, []);
+  assert.equal(req.systemInstruction.parts[0].text, "You are Hermes Agent");
+});
+
+test("executor transformRequest applies the configured pipeline (live wiring)", async () => {
+  enableAntigravity([
+    { kind: "replace_text", match: "Hermes", replacement: "H3rm3s", allOccurrences: true },
+  ]);
+  const executor = new AntigravityExecutor();
+  // Antigravity bodies arrive as the Cloud Code envelope; the executor transforms body.request.
+  const body = {
+    model: "gemini-3.8-flash-high",
+    request: {
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+      systemInstruction: { role: "system", parts: [{ text: "You are Hermes Agent" }] },
+    },
+  };
+
+  const result = await executor.transformRequest("gemini-3.8-flash-high", body, false, {
+    projectId: "review",
+  } as Parameters<AntigravityExecutor["transformRequest"]>[3]);
+
+  assert.ok(!(result instanceof Response), "transformRequest must not error for a valid body");
+  const envelope = result as unknown as {
+    request: { systemInstruction: { parts: Array<{ text: string }> } };
+  };
+  assert.equal(envelope.request.systemInstruction.parts[0].text, "You are H3rm3s Agent");
+});
+
+test("executor retries derive the same text and never mutate the caller body", async () => {
+  enableAntigravity([{ kind: "replace_text", match: "Hermes", replacement: "HermesX" }]);
+  const executor = new AntigravityExecutor();
+  const body = {
+    model: "gemini-3.8-flash-high",
+    request: {
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+      systemInstruction: { role: "system", parts: [{ text: "Hermes agent" }] },
+    },
+  };
+  const credentials = { projectId: "review" } as Parameters<
+    AntigravityExecutor["transformRequest"]
+  >[3];
+
+  const texts: string[] = [];
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const result = await executor.transformRequest(
+      "gemini-3.8-flash-high",
+      body,
+      false,
+      credentials
+    );
+    const envelope = result as unknown as {
+      request: { systemInstruction: { parts: Array<{ text: string }> } };
+    };
+    texts.push(envelope.request.systemInstruction.parts[0].text);
+  }
+
+  assert.deepEqual(texts, ["HermesX agent", "HermesX agent", "HermesX agent"]);
+  assert.equal(body.request.systemInstruction.parts[0].text, "Hermes agent");
+});
+
+test("executor survives a malformed operator config", async () => {
+  enableAntigravity([
+    {
+      kind: "replace_text",
+      match: "Hermes",
+      replacement: { toString: null },
+      allOccurrences: true,
+    },
+  ]);
+  const executor = new AntigravityExecutor();
+  const body = {
+    model: "gemini-3.8-flash-high",
+    request: {
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+      systemInstruction: { role: "system", parts: [{ text: "You are Hermes Agent" }] },
+    },
+  };
+
+  const result = await executor.transformRequest("gemini-3.8-flash-high", body, false, {
+    projectId: "review",
+  } as Parameters<AntigravityExecutor["transformRequest"]>[3]);
+
+  assert.ok(!(result instanceof Response), "malformed config must not become a request error");
+  const envelope = result as unknown as {
+    request: { systemInstruction: { parts: Array<{ text: string }> } };
+  };
+  assert.equal(envelope.request.systemInstruction.parts[0].text, "You are Hermes Agent");
 });

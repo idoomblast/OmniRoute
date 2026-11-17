@@ -671,7 +671,14 @@ export class AntigravityExecutor extends BaseExecutor {
     // request, after generation defaults, so `replace_text`/`replace_regex`
     // reach `systemInstruction` — the field that carries third-party-agent
     // fingerprints upstream. No-op when the provider entry is missing/disabled.
-    applyAntigravitySystemTransforms(transformedRequest as Record<string, unknown>);
+    // This runs before the per-attempt try in execute(), so a bridge failure
+    // must degrade to "untransformed" instead of aborting the request.
+    try {
+      applyAntigravitySystemTransforms(transformedRequest as Record<string, unknown>);
+    } catch {
+      // Intentionally swallowed: the transform is an optimization layer, and a
+      // broken operator config must never take the request down with it.
+    }
 
     const {
       project: _project,
