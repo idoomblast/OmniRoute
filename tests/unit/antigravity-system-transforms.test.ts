@@ -444,31 +444,61 @@ test("executor retries derive the same text and never mutate the caller body", a
   assert.equal(body.request.systemInstruction.parts[0].text, "Hermes agent");
 });
 
-test("executor survives a malformed operator config", async () => {
-  enableAntigravity([
-    {
-      kind: "replace_text",
-      match: "Hermes",
-      replacement: { toString: null },
-      allOccurrences: true,
-    },
-  ]);
+test("malformed replacement operations are skipped one by one at the executor boundary", async () => {
   const executor = new AntigravityExecutor();
-  const body = {
-    model: "gemini-3.8-flash-high",
-    request: {
-      contents: [{ role: "user", parts: [{ text: "hi" }] }],
-      systemInstruction: { role: "system", parts: [{ text: "You are Hermes Agent" }] },
-    },
+  const credentials = { projectId: "review" } as Parameters<
+    AntigravityExecutor["transformRequest"]
+  >[3];
+
+  const run = async (pipeline: unknown[]) => {
+    enableAntigravity(pipeline);
+    const body = {
+      model: "gemini-3.8-flash-high",
+      request: {
+        contents: [{ role: "user", parts: [{ text: "hi" }] }],
+        systemInstruction: { role: "system", parts: [{ text: "Hermes Hermes" }] },
+      },
+    };
+    const result = await executor.transformRequest(
+      "gemini-3.8-flash-high",
+      body,
+      false,
+      credentials
+    );
+    assert.ok(!(result instanceof Response), "malformed config must not become a request error");
+    const envelope = result as unknown as {
+      request: { systemInstruction: { parts: Array<{ text: string }> } };
+    };
+    return envelope.request.systemInstruction.parts[0].text;
   };
 
-  const result = await executor.transformRequest("gemini-3.8-flash-high", body, false, {
-    projectId: "review",
-  } as Parameters<AntigravityExecutor["transformRequest"]>[3]);
+  // Missing required `replacement` is malformed config, never "delete the text".
+  assert.equal(await run([{ kind: "replace_text", match: "Hermes" }]), "Hermes Hermes");
+  assert.equal(
+    await run([{ kind: "replace_text", match: "Hermes", allOccurrences: true }]),
+    "Hermes Hermes"
+  );
+  assert.equal(
+    await run([{ kind: "replace_regex", pattern: "Hermes", flags: "g" }]),
+    "Hermes Hermes"
+  );
+  assert.equal(
+    await run([
+      { kind: "replace_text", match: "Hermes", replacement: { toString: null } },
+      { kind: "replace_regex", pattern: "Hermes", flags: "g", replacement: { toString: null } },
+    ]),
+    "Hermes Hermes"
+  );
 
-  assert.ok(!(result instanceof Response), "malformed config must not become a request error");
-  const envelope = result as unknown as {
-    request: { systemInstruction: { parts: Array<{ text: string }> } };
-  };
-  assert.equal(envelope.request.systemInstruction.parts[0].text, "You are Hermes Agent");
+  // Explicit empty replacement is still an intentional deletion.
+  assert.equal(await run([{ kind: "replace_text", match: "Hermes", replacement: "" }]), " Hermes");
+
+  // A malformed op must not stop the valid ones that follow it.
+  assert.equal(
+    await run([
+      { kind: "replace_text", match: "Hermes" },
+      { kind: "replace_text", match: "Hermes", replacement: "H3rm3s", allOccurrences: true },
+    ]),
+    "H3rm3s H3rm3s"
+  );
 });

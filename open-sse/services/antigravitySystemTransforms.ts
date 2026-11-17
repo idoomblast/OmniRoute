@@ -147,11 +147,13 @@ function obfuscateWord(word: string): string {
 /**
  * Replacement strings are interpolated, not just compared: a non-string value
  * (e.g. an object whose `toString` is null) throws from `String.prototype.replace`
- * and would abort the whole request. Reject anything that is not a string.
- * An omitted replacement keeps the DSL's empty-string default.
+ * and would abort the whole request.
+ *
+ * `replacement` is a required field in the settings schema, so a missing value is
+ * malformed config — skip the op, never treat it as deletion. Only an explicit
+ * empty string deletes text.
  */
 function readReplacement(value: unknown): string | null {
-  if (value === undefined) return "";
   return typeof value === "string" ? value : null;
 }
 
