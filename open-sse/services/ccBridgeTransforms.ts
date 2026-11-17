@@ -53,11 +53,24 @@ export interface DropParagraphIfStartsWithOp {
   caseSensitive?: boolean;
 }
 
+/**
+ * Where an op applies. `tools` is accepted for config parity; only adapters
+ * that can address tool declarations consume it (the Antigravity bridge does
+ * not rewrite tool payloads).
+ */
+export type TransformTarget = "system" | "messages" | "tools";
+
 export interface ReplaceTextOp {
   kind: "replace_text";
   match: string;
   replacement: string;
   allOccurrences?: boolean;
+  /**
+   * Optional scope override. Consumed by adapters that can address more than
+   * system blocks (open-sse/services/antigravitySystemTransforms.ts). The
+   * Anthropic-shaped pipeline below applies to system blocks only.
+   */
+  targets?: TransformTarget[];
 }
 
 export interface ReplaceRegexOp {
@@ -65,6 +78,8 @@ export interface ReplaceRegexOp {
   pattern: string;
   flags?: string;
   replacement: string;
+  /** See ReplaceTextOp.targets. */
+  targets?: TransformTarget[];
 }
 
 export interface DropBlockIfContainsOp {

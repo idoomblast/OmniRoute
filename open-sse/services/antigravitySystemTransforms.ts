@@ -14,8 +14,11 @@
  *   - text-only ops: `replace_text`, `replace_regex`, `obfuscate_words`
  *   - default target is the system instruction (where third-party-agent
  *     fingerprints live); `messages` must be opted into via `op.targets`
- *   - function-call/response payloads are never rewritten, so tool arguments
- *     survive byte-for-byte
+ *   - function-call/response/inline-data parts are never rewritten, so tool
+ *     payloads survive byte-for-byte
+ *   - clone-on-write: the caller's shared text objects are never mutated, so
+ *     executor retries and internal model fallback re-derive the same payload
+ *     instead of compounding the transform
  *
  * Why this exists: Google slow-walks Antigravity requests whose system prompt
  * carries a literal third-party product name (e.g. "Hermes"), surfacing as a
@@ -31,7 +34,17 @@ import type { ProviderTransformsConfig, TransformOp } from "./systemTransforms.t
 /** Provider key used by the settings UI / config for this executor. */
 export const PROVIDER_ANTIGRAVITY = "antigravity";
 
-type TextHolder = { text?: unknown };
+type TransformTarget = "system" | "messages" | "tools";
+type TextHolder = { text?: unknown; [key: string]: unknown };
+
+interface TargetSelection {
+  system: boolean;
+  contents: boolean;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+}
 
 function resolveConfig(providerId: string): ProviderTransformsConfig | undefined {
   const config = getSystemTransformsConfig();
@@ -39,45 +52,80 @@ function resolveConfig(providerId: string): ProviderTransformsConfig | undefined
   return config.providers[providerId];
 }
 
-function collectTextParts(request: Record<string, unknown>, includeContents: boolean): string[] {
-  const out: string[] = [];
-  const systemInstruction = request.systemInstruction as { parts?: unknown } | undefined;
-  if (systemInstruction && Array.isArray(systemInstruction.parts)) {
-    for (const part of systemInstruction.parts as TextHolder[]) {
-      if (typeof part?.text === "string") out.push(part.text);
-    }
+/**
+ * Explicit `targets` are honoured verbatim. Without one, the Antigravity
+ * default is system-only: rewriting conversation text is destructive and was
+ * never the intent of this bridge, so `messages` must be opted into.
+ */
+function resolveTargets(op: TransformOp): TargetSelection {
+  const explicit = (op as { targets?: TransformTarget[] }).targets;
+  if (!Array.isArray(explicit) || explicit.length === 0) {
+    return { system: true, contents: false };
   }
-  if (includeContents && Array.isArray(request.contents)) {
-    for (const content of request.contents as Array<{ parts?: unknown }>) {
-      if (!content || !Array.isArray(content.parts)) continue;
-      for (const part of content.parts as TextHolder[]) {
-        if (typeof part?.text === "string") out.push(part.text);
+  return { system: explicit.includes("system"), contents: explicit.includes("messages") };
+}
+
+/**
+ * Clone-on-write over a parts array. Untouched (or non-text) parts keep their
+ * original identity, and the input array is never mutated.
+ */
+function rewriteTextParts(
+  parts: unknown[],
+  transform: (text: string) => string
+): { parts: unknown[]; changed: boolean } {
+  let changed = false;
+  const next = parts.map((part) => {
+    const holder = asRecord(part) as TextHolder | null;
+    if (!holder || typeof holder.text !== "string") return part;
+    const text = transform(holder.text);
+    if (text === holder.text) return part;
+    changed = true;
+    return { ...holder, text };
+  });
+  return { parts: changed ? next : parts, changed };
+}
+
+/**
+ * Apply `transform` to the selected text holders. Returns true when at least one
+ * text part changed. Assignments only happen on change, so an unconfigured or
+ * no-match request stays byte- and reference-identical.
+ */
+function applyToRequest(
+  request: Record<string, unknown>,
+  selection: TargetSelection,
+  transform: (text: string) => string
+): boolean {
+  let changed = false;
+
+  if (selection.system) {
+    const systemInstruction = asRecord(request.systemInstruction);
+    const parts = systemInstruction?.parts;
+    if (systemInstruction && Array.isArray(parts)) {
+      const result = rewriteTextParts(parts, transform);
+      if (result.changed) {
+        request.systemInstruction = { ...systemInstruction, parts: result.parts };
+        changed = true;
       }
     }
   }
-  return out;
-}
 
-function replaceInParts(
-  request: Record<string, unknown>,
-  includeContents: boolean,
-  transform: (text: string) => string
-): void {
-  const applyTo = (holder: TextHolder) => {
-    if (typeof holder?.text === "string") holder.text = transform(holder.text);
-  };
-
-  const systemInstruction = request.systemInstruction as { parts?: unknown } | undefined;
-  if (systemInstruction && Array.isArray(systemInstruction.parts)) {
-    for (const part of systemInstruction.parts as TextHolder[]) applyTo(part);
-  }
-
-  if (includeContents && Array.isArray(request.contents)) {
-    for (const content of request.contents as Array<{ parts?: unknown }>) {
-      if (!content || !Array.isArray(content.parts)) continue;
-      for (const part of content.parts as TextHolder[]) applyTo(part);
+  if (selection.contents && Array.isArray(request.contents)) {
+    let contentsChanged = false;
+    const nextContents = (request.contents as unknown[]).map((content) => {
+      const holder = asRecord(content);
+      if (!holder || !Array.isArray(holder.parts)) return content;
+      const result = rewriteTextParts(holder.parts, transform);
+      if (!result.changed) return content;
+      contentsChanged = true;
+      return { ...holder, parts: result.parts };
+    });
+    if (contentsChanged) {
+      request.contents = nextContents;
+      changed = true;
     }
   }
+
+  return changed;
 }
 
 function escapeRegex(str: string): string {
@@ -95,32 +143,33 @@ function obfuscateWord(word: string): string {
 function buildTextTransform(op: TransformOp): ((text: string) => string) | null {
   switch (op.kind) {
     case "replace_text": {
-      const match = (op as { match?: string }).match;
-      if (!match) return null;
-      const replacement = (op as { replacement?: string }).replacement ?? "";
-      const all = (op as { allOccurrences?: boolean }).allOccurrences === true;
+      if (!op.match) return null;
+      const replacement = op.replacement ?? "";
+      const all = op.allOccurrences === true;
       return (text) =>
-        all ? text.split(match).join(replacement) : text.replace(match, replacement);
+        all ? text.split(op.match).join(replacement) : text.replace(op.match, replacement);
     }
     case "replace_regex": {
-      const pattern = (op as { pattern?: string }).pattern;
-      if (!pattern) return null;
-      const flags = (op as { flags?: string }).flags ?? "g";
-      const replacement = (op as { replacement?: string }).replacement ?? "";
+      if (!op.pattern) return null;
+      const replacement = op.replacement ?? "";
+      // Parity with the generic DSL (ccBridgeTransforms.ts applyReplaceRegex):
+      // supplied flags are used verbatim and `u` is the default. Never inject
+      // `g` — that would turn a first-occurrence rule into a global rewrite.
       let regex: RegExp;
       try {
-        regex = new RegExp(pattern, flags.includes("g") ? flags : `${flags}g`);
+        regex = new RegExp(op.pattern, op.flags ?? "u");
       } catch {
         return null;
       }
       return (text) => text.replace(regex, replacement);
     }
     case "obfuscate_words": {
-      const words = ((op as { words?: string[] }).words ?? []).filter(
-        (w): w is string => typeof w === "string" && w.length > 0
+      if (!Array.isArray(op.words)) return null;
+      const words = op.words.filter(
+        (word): word is string => typeof word === "string" && word.length > 0
       );
       if (words.length === 0) return null;
-      const regexes = words.map((w) => new RegExp(escapeRegex(w), "gi"));
+      const regexes = words.map((word) => new RegExp(escapeRegex(word), "gi"));
       return (text) => regexes.reduce((acc, re) => acc.replace(re, obfuscateWord), text);
     }
     default:
@@ -131,14 +180,18 @@ function buildTextTransform(op: TransformOp): ((text: string) => string) | null 
 }
 
 export interface AntigravitySystemTransformResult {
+  /** Op kinds that actually changed at least one text part. */
   appliedOpKinds: string[];
+  /** True when an op explicitly targeted conversation contents. */
   targetedMessages: boolean;
 }
 
 /**
  * Apply the operator-configured pipeline for `providerId` (default
- * `antigravity`) to a Gemini/Cloud Code request. Mutates `request` in place.
- * No-op when the provider entry is missing or disabled.
+ * `antigravity`) to a Gemini/Cloud Code request. Returns what changed. The
+ * caller's input objects are never mutated — only the `request` passed in, and
+ * only where a text part actually changed. No-op when the provider entry is
+ * missing or disabled.
  */
 export function applyAntigravitySystemTransforms(
   request: Record<string, unknown> | null | undefined,
@@ -149,21 +202,17 @@ export function applyAntigravitySystemTransforms(
 
   const providerConfig = resolveConfig(providerId);
   if (!providerConfig || !providerConfig.enabled) return result;
+  if (!Array.isArray(providerConfig.pipeline)) return result;
 
-  for (const op of providerConfig.pipeline ?? []) {
+  for (const op of providerConfig.pipeline) {
+    if (!op || typeof op !== "object") continue;
     const transform = buildTextTransform(op);
     if (!transform) continue;
-    const targets = (op as { targets?: string[] }).targets;
-    const includeContents = Array.isArray(targets) && targets.includes("messages");
-    if (includeContents) result.targetedMessages = true;
-    replaceInParts(request, includeContents, transform);
-    result.appliedOpKinds.push(op.kind);
+    const selection = resolveTargets(op);
+    if (selection.contents) result.targetedMessages = true;
+    if (!selection.system && !selection.contents) continue;
+    if (applyToRequest(request, selection, transform)) result.appliedOpKinds.push(op.kind);
   }
 
   return result;
-}
-
-/** Test-only helper: expose how many text parts a request carries. */
-export function countTextParts(request: Record<string, unknown>, includeContents = false): number {
-  return collectTextParts(request, includeContents).length;
 }

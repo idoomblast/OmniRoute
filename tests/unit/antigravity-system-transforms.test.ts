@@ -3,8 +3,9 @@
  *
  * Covers the gap that made `providers.antigravity` dead config: the base DSL
  * only runs on Anthropic-shaped `body.system`, while Antigravity ships a
- * Gemini-shaped `request.systemInstruction`. These tests pin the behaviour of
- * the bridge added in open-sse/services/antigravitySystemTransforms.ts.
+ * Gemini-shaped `request.systemInstruction`. These tests pin the bridge in
+ * open-sse/services/antigravitySystemTransforms.ts, including the executor
+ * retry boundary (clone-on-write) and the real settings-schema boundary.
  */
 
 import assert from "node:assert/strict";
@@ -12,15 +13,23 @@ import test from "node:test";
 
 import {
   applyAntigravitySystemTransforms,
-  countTextParts,
   PROVIDER_ANTIGRAVITY,
 } from "../../open-sse/services/antigravitySystemTransforms.ts";
 import {
   resetSystemTransformsConfig,
   setSystemTransformsConfig,
 } from "../../open-sse/services/systemTransforms.ts";
+import { updateSettingsSchema } from "../../src/shared/validation/settingsSchemas.ts";
 
-function geminiRequest(systemText: string, userText = "hello") {
+type TextPart = Record<string, unknown> & { text?: string };
+
+type GeminiRequest = {
+  contents: Array<{ role?: string; parts: TextPart[] }>;
+  systemInstruction: { role?: string; parts: TextPart[] };
+  tools?: Array<Record<string, unknown>>;
+};
+
+function geminiRequest(systemText: string, userText = "hello"): GeminiRequest {
   return {
     contents: [{ role: "user", parts: [{ text: userText }] }],
     systemInstruction: { role: "system", parts: [{ text: systemText }] },
@@ -33,6 +42,18 @@ function enableAntigravity(pipeline: unknown[]) {
       [PROVIDER_ANTIGRAVITY]: { enabled: true, pipeline },
     },
   });
+}
+
+function systemTextOf(request: Record<string, unknown>): string | undefined {
+  const system = request.systemInstruction as { parts?: TextPart[] } | undefined;
+  return system?.parts?.[0]?.text;
+}
+
+/** Mirrors the executor: each attempt derives a fresh body from the caller's input. */
+function transformAttempt(input: GeminiRequest): string | undefined {
+  const attempt = { ...input } as Record<string, unknown>;
+  applyAntigravitySystemTransforms(attempt);
+  return systemTextOf(attempt);
 }
 
 test.afterEach(() => resetSystemTransformsConfig());
@@ -57,10 +78,12 @@ test("contents are left untouched unless targets opts into messages", () => {
     { kind: "replace_text", match: "Hermes", replacement: "H3rm3s", allOccurrences: true },
   ]);
   const req = geminiRequest("You are Hermes Agent", "please inspect Hermes source");
+  const originalContents = req.contents;
 
   applyAntigravitySystemTransforms(req);
-  assert.match(req.systemInstruction.parts[0].text, /H3rm3s/);
-  assert.match(req.contents[0].parts[0].text, /Hermes source/);
+  assert.match(req.systemInstruction.parts[0].text as string, /H3rm3s/);
+  assert.match(req.contents[0].parts[0].text as string, /Hermes source/);
+  assert.equal(req.contents, originalContents, "untargeted contents array must keep identity");
 
   const withMessages = geminiRequest("You are Hermes Agent", "please inspect Hermes source");
   enableAntigravity([
@@ -74,17 +97,111 @@ test("contents are left untouched unless targets opts into messages", () => {
   ]);
   const result = applyAntigravitySystemTransforms(withMessages);
   assert.equal(result.targetedMessages, true);
-  assert.match(withMessages.contents[0].parts[0].text, /H3rm3s source/);
+  assert.match(withMessages.contents[0].parts[0].text as string, /H3rm3s source/);
 });
 
-test("replace_regex supports case-insensitive substitution", () => {
-  enableAntigravity([
-    { kind: "replace_regex", pattern: "hermes", flags: "gi", replacement: "H3rm3s" },
-  ]);
-  const req = geminiRequest("you are HERMES agent / hermes-agent");
+test("explicit targets exclude the system instruction", () => {
+  enableAntigravity([{ kind: "obfuscate_words", words: ["Hermes"], targets: ["messages"] }]);
+  const req = geminiRequest("You are Hermes Agent", "please inspect Hermes source");
+  const systemBefore = req.systemInstruction.parts[0].text;
 
   applyAntigravitySystemTransforms(req);
-  assert.equal(req.systemInstruction.parts[0].text, "you are H3rm3s agent / H3rm3s-agent");
+
+  assert.equal(req.systemInstruction.parts[0].text, systemBefore);
+  assert.notEqual(req.contents[0].parts[0].text, "please inspect Hermes source");
+});
+
+test("tools are never rewritten, even when messages are targeted", () => {
+  enableAntigravity([
+    {
+      kind: "replace_text",
+      match: "Hermes",
+      replacement: "H3rm3s",
+      allOccurrences: true,
+      targets: ["system", "messages", "tools"],
+    },
+  ]);
+  const req = geminiRequest("You are Hermes Agent", "Hermes source");
+  req.tools = [
+    {
+      functionDeclarations: [
+        { name: "run_hermes", description: "Runs the Hermes helper", parameters: {} },
+      ],
+    },
+  ];
+  const toolsBefore = JSON.stringify(req.tools);
+
+  applyAntigravitySystemTransforms(req);
+
+  assert.equal(JSON.stringify(req.tools), toolsBefore);
+  assert.match(req.systemInstruction.parts[0].text as string, /H3rm3s/);
+  assert.match(req.contents[0].parts[0].text as string, /H3rm3s/);
+});
+
+test("non-text parts inside targeted contents survive untouched", () => {
+  enableAntigravity([
+    {
+      kind: "replace_text",
+      match: "Hermes",
+      replacement: "H3rm3s",
+      allOccurrences: true,
+      targets: ["system", "messages"],
+    },
+  ]);
+  const req = geminiRequest("You are Hermes Agent", "call the tool");
+  req.contents.push({
+    role: "model",
+    parts: [
+      { functionCall: { name: "run_hermes", args: { q: "Hermes" } } },
+      { functionResponse: { name: "run_hermes", response: { result: "Hermes ok" } } },
+      { inlineData: { mimeType: "text/plain", data: "Hermes" } },
+    ],
+  });
+
+  applyAntigravitySystemTransforms(req);
+
+  const parts = req.contents[1].parts;
+  assert.deepEqual(parts[0], { functionCall: { name: "run_hermes", args: { q: "Hermes" } } });
+  assert.deepEqual(parts[1], {
+    functionResponse: { name: "run_hermes", response: { result: "Hermes ok" } },
+  });
+  assert.deepEqual(parts[2], { inlineData: { mimeType: "text/plain", data: "Hermes" } });
+});
+
+test("replace_regex honours supplied flags instead of forcing global", () => {
+  enableAntigravity([{ kind: "replace_regex", pattern: "Hermes", flags: "i", replacement: "X" }]);
+  const req = geminiRequest("Hermes hermes");
+  applyAntigravitySystemTransforms(req);
+  assert.equal(req.systemInstruction.parts[0].text, "X hermes");
+
+  const withGlobal = geminiRequest("Hermes hermes");
+  enableAntigravity([{ kind: "replace_regex", pattern: "hermes", flags: "gi", replacement: "X" }]);
+  applyAntigravitySystemTransforms(withGlobal);
+  assert.equal(withGlobal.systemInstruction.parts[0].text, "X X");
+
+  const withoutFlags = geminiRequest("Hermes Hermes");
+  enableAntigravity([{ kind: "replace_regex", pattern: "Hermes", replacement: "X" }]);
+  applyAntigravitySystemTransforms(withoutFlags);
+  assert.equal(withoutFlags.systemInstruction.parts[0].text, "X Hermes");
+});
+
+test("repeated attempts do not compound the transform (retry boundary)", () => {
+  enableAntigravity([{ kind: "replace_text", match: "Hermes", replacement: "HermesX" }]);
+  const input = geminiRequest("Hermes agent");
+  const originalPart = input.systemInstruction.parts[0];
+  const originalContents = input.contents;
+
+  const first = transformAttempt(input);
+  const second = transformAttempt(input);
+  const third = transformAttempt(input);
+
+  assert.equal(first, "HermesX agent");
+  assert.equal(second, "HermesX agent");
+  assert.equal(third, "HermesX agent");
+  assert.equal(input.systemInstruction.parts[0], originalPart, "caller part must not be replaced");
+  assert.equal(input.systemInstruction.parts[0].text, "Hermes agent");
+  assert.equal(input.contents, originalContents);
+  assert.equal(input.contents[0].parts[0].text, "hello");
 });
 
 test("disabled provider entry is a strict no-op", () => {
@@ -97,12 +214,14 @@ test("disabled provider entry is a strict no-op", () => {
     },
   });
   const req = geminiRequest("You are Hermes Agent");
+  const systemInstruction = req.systemInstruction;
   const before = JSON.stringify(req);
 
   const result = applyAntigravitySystemTransforms(req);
 
   assert.deepEqual(result.appliedOpKinds, []);
   assert.equal(JSON.stringify(req), before);
+  assert.equal(req.systemInstruction, systemInstruction);
 });
 
 test("missing provider entry is a strict no-op", () => {
@@ -129,8 +248,19 @@ test("structural ops are ignored instead of corrupting the Gemini envelope", () 
   assert.equal(JSON.stringify(req), before);
 });
 
-test("malformed regex is skipped without throwing", () => {
-  enableAntigravity([{ kind: "replace_regex", pattern: "([a-z", flags: "g", replacement: "x" }]);
+test("malformed config entries are skipped without throwing", () => {
+  setSystemTransformsConfig({
+    providers: {
+      [PROVIDER_ANTIGRAVITY]: {
+        enabled: true,
+        pipeline: [
+          null,
+          { kind: "obfuscate_words", words: "Hermes" },
+          { kind: "replace_regex", pattern: "([a-z", flags: "g", replacement: "x" },
+        ],
+      },
+    },
+  });
   const req = geminiRequest("You are Hermes Agent");
 
   const result = applyAntigravitySystemTransforms(req);
@@ -139,30 +269,55 @@ test("malformed regex is skipped without throwing", () => {
   assert.equal(req.systemInstruction.parts[0].text, "You are Hermes Agent");
 });
 
-test("countTextParts counts system parts by default and message parts on request", () => {
-  const req = geminiRequest("sys", "user");
-  assert.equal(countTextParts(req), 1);
-  assert.equal(countTextParts(req, true), 2);
+test("settings schema preserves targets for replacements", () => {
+  const pipeline = [
+    {
+      kind: "replace_text",
+      match: "Hermes",
+      replacement: "H3rm3s",
+      allOccurrences: true,
+      targets: ["system", "messages"],
+    },
+    {
+      kind: "replace_regex",
+      pattern: "hermes",
+      flags: "gi",
+      replacement: "H3rm3s",
+      targets: ["messages"],
+    },
+  ];
+
+  const parsed = updateSettingsSchema.parse({
+    systemTransforms: { providers: { [PROVIDER_ANTIGRAVITY]: { enabled: true, pipeline } } },
+  });
+
+  assert.deepEqual(parsed.systemTransforms?.providers[PROVIDER_ANTIGRAVITY]?.pipeline, pipeline);
 });
 
-test("non-text parts (function calls) are never rewritten", () => {
-  enableAntigravity([
-    { kind: "replace_text", match: "Hermes", replacement: "H3rm3s", allOccurrences: true },
-  ]);
-  const req = {
-    contents: [
-      {
-        role: "model",
-        parts: [{ functionCall: { name: "run_hermes", args: { q: "Hermes" } } }],
+test("a schema-parsed config is applied by the bridge end to end", () => {
+  const parsed = updateSettingsSchema.parse({
+    systemTransforms: {
+      providers: {
+        [PROVIDER_ANTIGRAVITY]: {
+          enabled: true,
+          pipeline: [
+            {
+              kind: "replace_text",
+              match: "Hermes",
+              replacement: "H3rm3s",
+              allOccurrences: true,
+              targets: ["messages"],
+            },
+          ],
+        },
       },
-    ],
-    systemInstruction: { parts: [{ text: "You are Hermes Agent" }] },
-  };
+    },
+  });
+  setSystemTransformsConfig(parsed.systemTransforms);
 
+  const req = geminiRequest("You are Hermes Agent", "find Hermes source");
   applyAntigravitySystemTransforms(req);
 
-  const call = (req.contents[0].parts[0] as { functionCall: { name: string; args: { q: string } } })
-    .functionCall;
-  assert.equal(call.name, "run_hermes");
-  assert.equal(call.args.q, "Hermes");
+  assert.equal(req.systemInstruction.parts[0].text, "You are Hermes Agent");
+  assert.equal(req.contents[0].parts[0].text, "find H3rm3s source");
 });

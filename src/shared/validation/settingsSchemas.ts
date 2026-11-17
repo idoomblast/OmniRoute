@@ -31,11 +31,16 @@ const transformDropParagraphIfStartsWithSchema = z.object({
   caseSensitive: z.boolean().optional(),
 });
 
+const transformTargetValues = ["system", "messages", "tools"] as const;
+
 const transformReplaceTextSchema = z.object({
   kind: z.literal("replace_text"),
   match: z.string().min(1).max(500),
   replacement: z.string().max(500),
   allOccurrences: z.boolean().optional(),
+  // Adapters that can address more than system blocks (the antigravity bridge)
+  // honour this list; the Anthropic-shaped pipeline applies to system only.
+  targets: z.array(z.enum(transformTargetValues)).max(3).optional(),
 });
 
 const transformReplaceRegexSchema = z.object({
@@ -43,6 +48,7 @@ const transformReplaceRegexSchema = z.object({
   pattern: z.string().min(1).max(500),
   flags: z.string().max(10).optional(),
   replacement: z.string().max(500),
+  targets: z.array(z.enum(transformTargetValues)).max(3).optional(),
 });
 
 const transformDropBlockIfContainsSchema = z.object({
