@@ -74,6 +74,7 @@ import {
   getAntigravityEnvelopeUserAgent,
   getAntigravitySessionId,
 } from "../services/antigravityIdentity.ts";
+import { applyAntigravitySystemTransforms } from "../services/antigravitySystemTransforms.ts";
 
 const MAX_RETRY_AFTER_MS = 60_000;
 const LONG_RETRY_THRESHOLD_MS = 60_000;
@@ -664,6 +665,13 @@ export class AntigravityExecutor extends BaseExecutor {
       : rawTransformedRequest;
 
     applyAntigravityGenerationDefaults(transformedRequest, upstreamModel);
+
+    // Operator-configured systemTransforms pipeline (Settings → Routing →
+    // System Transforms, provider key `antigravity`). Runs on the Gemini-shaped
+    // request, after generation defaults, so `replace_text`/`replace_regex`
+    // reach `systemInstruction` — the field that carries third-party-agent
+    // fingerprints upstream. No-op when the provider entry is missing/disabled.
+    applyAntigravitySystemTransforms(transformedRequest as Record<string, unknown>);
 
     const {
       project: _project,
