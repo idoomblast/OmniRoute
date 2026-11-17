@@ -733,7 +733,8 @@ function wrapInCloudCodeEnvelope(model, cloudCodeRequest, credentials = null) {
     },
     model: cleanModel,
     userAgent: getAntigravityEnvelopeUserAgent(credentials),
-    requestType: "agent",
+    // Omitted on purpose: `requestType:"agent"` is throttled to a dead bucket on consumer
+    // Antigravity projects and returns a false 429 (can1357/oh-my-pi#11689).
   };
   if (cloudCodeRequest._toolNameMap instanceof Map && cloudCodeRequest._toolNameMap.size > 0) {
     envelope._toolNameMap = cloudCodeRequest._toolNameMap;

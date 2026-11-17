@@ -133,14 +133,7 @@ test("AntigravityExecutor.transformRequest normalizes model, project and content
   if (result instanceof Response) throw new Error("Unexpected Response from transformRequest");
   assert.equal(result.project, "project-1");
   assert.equal(result.model, "gemini-3.1-pro");
-  assert.deepEqual(Object.keys(result), [
-    "project",
-    "requestId",
-    "request",
-    "model",
-    "userAgent",
-    "requestType",
-  ]);
+  assert.deepEqual(Object.keys(result), ["project", "requestId", "request", "model", "userAgent"]);
   assert.equal(result.userAgent, "antigravity");
   assert.match(result.requestId, /^agent\/\d+\/[0-9a-f]{8}$/);
   assert.equal(result.enabledCreditTypes, undefined);
@@ -997,7 +990,6 @@ test("AntigravityExecutor.execute applies CLI fingerprint when enabled", async (
       "request",
       "model",
       "userAgent",
-      "requestType",
       "enabledCreditTypes",
     ]);
     assert.deepEqual(parsedBody.enabledCreditTypes, ["GOOGLE_ONE_AI"]);
@@ -1074,7 +1066,10 @@ test("AntigravityExecutor.transformRequest maps Claude models through Gemini con
 
   assert.equal(result.project, "project-1");
   assert.equal(result.model, "claude-sonnet-4-6");
-  assert.equal(result.requestType, "agent");
+  // `requestType` is intentionally absent: Google throttles the "agent" bucket on consumer
+  // projects and answers a false 429 (can1357/oh-my-pi#11689). Opt in via
+  // OMNIROUTE_ANTIGRAVITY_REQUEST_TYPE=agent.
+  assert.equal(result.requestType, undefined);
   assert.ok(result.request.sessionId);
   assert.equal(result.enabledCreditTypes, undefined);
   assert.deepEqual(result.request.contents, [{ role: "user", parts: [{ text: "Hello" }] }]);
@@ -1094,4 +1089,40 @@ test("AntigravityExecutor.transformRequest maps Claude models through Gemini con
   assert.equal(result.request.stream, undefined);
   assert.equal(result.request.temperature, undefined);
   assert.equal(result.request.toolConfig, undefined);
+});
+
+test('AntigravityExecutor omits requestType:"agent" unless explicitly opted in', async () => {
+  const executor = new AntigravityExecutor();
+  const credentials = { projectId: "project-1" };
+
+  const body = {
+    model: "gemini-3.8-flash-low",
+    userAgent: "antigravity",
+    requestId: "agent-123",
+    userAgentNote: "ignored",
+    request: { contents: [{ role: "user", parts: [{ text: "hi" }] }] },
+  };
+
+  const withoutEnv = (await executor.transformRequest(
+    "antigravity/gemini-3.8-flash-low",
+    { ...body },
+    true,
+    credentials
+  )) as AntigravityTransformResult;
+  // Consumer Antigravity projects answer a generic 429 RESOURCE_EXHAUSTED for this
+  // bucket even with quota remaining (can1357/oh-my-pi#11689), so it must be absent.
+  assert.equal("requestType" in withoutEnv, false);
+
+  process.env.OMNIROUTE_ANTIGRAVITY_REQUEST_TYPE = "agent";
+  try {
+    const withEnv = (await executor.transformRequest(
+      "antigravity/gemini-3.8-flash-low",
+      { ...body },
+      true,
+      credentials
+    )) as AntigravityTransformResult;
+    assert.equal(withEnv.requestType, "agent");
+  } finally {
+    delete process.env.OMNIROUTE_ANTIGRAVITY_REQUEST_TYPE;
+  }
 });

@@ -137,7 +137,11 @@ type AntigravityRequestEnvelope = Record<string, unknown> & {
   project: string;
   model?: string;
   userAgent: "antigravity";
-  requestType: "agent" | "image_gen";
+  // Google's Cloud Code gateway applies a separate, tightly-throttled quota bucket to
+  // `requestType:"agent"` on consumer projects and answers a generic
+  // 429 RESOURCE_EXHAUSTED instead of serving the request (can1357/oh-my-pi#11689).
+  // Omitting the field routes to the normal interactive bucket, so it is opt-in only.
+  requestType?: "agent" | "image_gen";
   requestId: string;
   request: Record<string, unknown>;
   enabledCreditTypes?: string[];
@@ -706,14 +710,23 @@ export class AntigravityExecutor extends BaseExecutor {
       ...passthroughFields
     } = normalizedBody;
 
-    const requestType = _requestType === "image_gen" ? "image_gen" : "agent";
+    // `requestType:"agent"` lands in a walled-off quota bucket on consumer Antigravity
+    // projects: Google answers 429 RESOURCE_EXHAUSTED even with quota left
+    // (can1357/oh-my-pi#11689). Send it only when explicitly opted in; image_gen keeps
+    // its own bucket because that path is not affected.
+    const requestType =
+      _requestType === "image_gen"
+        ? "image_gen"
+        : process.env.OMNIROUTE_ANTIGRAVITY_REQUEST_TYPE === "agent"
+          ? "agent"
+          : undefined;
     const envelope: AntigravityRequestEnvelope = {
       project: projectId,
       requestId: generateAntigravityRequestId(),
       request: transformedRequest,
       model: upstreamModel,
       userAgent: getAntigravityEnvelopeUserAgent(credentials),
-      requestType,
+      ...(requestType ? { requestType } : {}),
       ...passthroughFields,
     };
 
