@@ -193,8 +193,13 @@ export async function runOAuthStatus(opts, cmd) {
     process.exit(1);
   }
   const data = await res.json();
-  const connections = (data.providers ?? data.items ?? data).filter(
-    (c) => c.authType === "oauth" || c.authType === "oauth2"
+  // /api/providers answers `{ connections, total }` (and has no server-side
+  // provider filter), so normalise the list here and filter locally.
+  const list = data.providers ?? data.connections ?? data.items ?? data;
+  const connections = (Array.isArray(list) ? list : []).filter(
+    (c) =>
+      (c.authType === "oauth" || c.authType === "oauth2") &&
+      (!opts.provider || c.provider === opts.provider)
   );
   emit(connections, globalOpts, connectionSchema);
 }
