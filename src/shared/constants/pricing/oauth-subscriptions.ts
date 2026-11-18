@@ -99,6 +99,13 @@ export const DEFAULT_PRICING_OAUTH = {
     "claude-haiku-5-5": CLAUDE_HAIKU_5_PRICING,
   },
   cx: {
+    "gpt-6.2-sol": GPT_6_1_SOL_CODEX_PRICING,
+    "gpt-6.2-sol-ultra": GPT_6_1_SOL_CODEX_PRICING,
+    "gpt-6.2-sol-max": GPT_6_1_SOL_CODEX_PRICING,
+    "gpt-6.2-sol-xhigh": GPT_6_1_SOL_CODEX_PRICING,
+    "gpt-6.2-sol-high": GPT_6_1_SOL_CODEX_PRICING,
+    "gpt-6.2-sol-medium": GPT_6_1_SOL_CODEX_PRICING,
+    "gpt-6.2-sol-low": GPT_6_1_SOL_CODEX_PRICING,
     "gpt-6.1-sol": GPT_6_1_SOL_CODEX_PRICING,
     "gpt-6.1-sol-ultra": GPT_6_1_SOL_CODEX_PRICING,
     "gpt-6.1-sol-max": GPT_6_1_SOL_CODEX_PRICING,

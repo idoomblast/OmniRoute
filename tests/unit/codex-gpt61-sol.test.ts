@@ -34,9 +34,9 @@ test.after(async () => {
 });
 
 test("Codex client version supports GPT-6.1 Sol", () => {
-  // The ChatGPT backend gates gpt-6.1-sol on client versions >= 0.159.0; the
+  // The ChatGPT backend gates gpt-6.x-sol on client versions >= 0.159.0; the
   // pinned default must stay at or above that line (see #15192).
-  assert.equal(DEFAULT_CODEX_CLIENT_VERSION, "0.159.2");
+  assert.match(DEFAULT_CODEX_CLIENT_VERSION, /^\d+\.\d+\.\d+$/);
   const versionAtLeast = (actual: string, minimum: string): boolean => {
     const a = actual.split(".").map(Number);
     const b = minimum.split(".").map(Number);
@@ -47,6 +47,8 @@ test("Codex client version supports GPT-6.1 Sol", () => {
     return true;
   };
   assert.ok(versionAtLeast(DEFAULT_CODEX_CLIENT_VERSION, "0.159.0"));
+  // gpt-6.2-sol rejects 0.159.2 with model_not_found; 0.170.0 is verified working.
+  assert.ok(versionAtLeast(DEFAULT_CODEX_CLIENT_VERSION, "0.170.0"));
 });
 
 type ResponsesBody = Record<string, unknown> & {

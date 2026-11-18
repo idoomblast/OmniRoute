@@ -7,6 +7,8 @@
  * @module lib/usage/costCalculator
  */
 
+import { toNumber } from "@/shared/utils/numeric";
+
 import { isFlatRateProvider } from "./flatRateProviders";
 
 /**
@@ -65,15 +67,6 @@ function extractExactCostUsd(
   return null;
 }
 
-function toNumber(value: unknown, fallback = 0): number {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim().length > 0) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : fallback;
-  }
-  return fallback;
-}
-
 function normalizeServiceTier(value: unknown): string {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
@@ -104,6 +97,9 @@ export function getCodexFastCostMultiplier(
   // GPT-6.1 Sol purchased-credit/USD Fast rate is 2x, not the 2.5x
   // included-subscription consumption multiplier (codex/pricing and codex/speed).
   if (compactModelKey === "gpt6.1sol") return 2;
+  // GPT-6.2 Sol priority/Fast cost is 2x Standard on the OpenAI price sheet
+  // (LiteLLM: input_cost_per_token_priority = 4e-06 vs 2e-06 base).
+  if (compactModelKey === "gpt6.2sol") return 2;
   // Codex GPT-6 Fast is 2.5x Standard (https://developers.openai.com/codex/pricing).
   if (/^gpt6(?:astra|sol|luna)$/.test(compactModelKey)) {
     return 2.5;

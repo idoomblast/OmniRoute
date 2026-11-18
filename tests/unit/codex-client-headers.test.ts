@@ -79,15 +79,15 @@ test("CodexExecutor.buildHeaders falls back to the default client version when c
   const executor = new CodexExecutor();
 
   const noHeaders = executor.buildHeaders({ accessToken: "codex-token" }, true);
-  assert.equal(noHeaders.Version, "0.159.2");
+  assert.equal(noHeaders.Version, "0.170.0");
 
   const emptyHeaders = executor.buildHeaders({ accessToken: "codex-token" }, true, {});
-  assert.equal(emptyHeaders.Version, "0.159.2");
+  assert.equal(emptyHeaders.Version, "0.170.0");
 
   const nonCodexUserAgent = executor.buildHeaders({ accessToken: "codex-token" }, true, {
     "user-agent": "curl/8.4.0",
   });
-  assert.equal(nonCodexUserAgent.Version, "0.159.2");
+  assert.equal(nonCodexUserAgent.Version, "0.170.0");
 });
 
 test("CodexExecutor.buildHeaders rejects injection attempts in the caller's version/User-Agent headers", () => {
@@ -96,13 +96,13 @@ test("CodexExecutor.buildHeaders rejects injection attempts in the caller's vers
   const crlfVersion = executor.buildHeaders({ accessToken: "codex-token" }, true, {
     version: "1.0.0\r\nX-Injected: evil",
   });
-  assert.equal(crlfVersion.Version, "0.159.2");
+  assert.equal(crlfVersion.Version, "0.170.0");
   assert.equal(crlfVersion["User-Agent"].includes("\r\n"), false);
 
   const overlongVersion = executor.buildHeaders({ accessToken: "codex-token" }, true, {
     version: "1.0.0-" + "a".repeat(30),
   });
-  assert.equal(overlongVersion.Version, "0.159.2");
+  assert.equal(overlongVersion.Version, "0.170.0");
 
   const injectedUserAgent = executor.buildHeaders({ accessToken: "codex-token" }, true, {
     "user-agent": "codex_cli_rs/1.0.0\r\nX-Evil: 1",
