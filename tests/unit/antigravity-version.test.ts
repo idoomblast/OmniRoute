@@ -205,3 +205,16 @@ test("concurrent requests coalesce within each product without crossing products
   assert.equal(ideCalls, 1);
   assert.equal(cliCalls, 1);
 });
+
+test("a cached CLI version below the floor never reaches the wire", async () => {
+  // The resolver applies the floor, but the header path reads the CACHE directly.
+  // A stale/seed cache of 1.2.7 made an IDE-backed tier call emit 1.2.7, which the
+  // upstream answers with 404 for Gemini 4 tier ids.
+  seedAntigravityCliVersionCache("1.2.7");
+  assert.equal(getCachedAntigravityCliVersion(), "1.2.8");
+
+  // A cache at or above the floor is honored unchanged.
+  seedAntigravityCliVersionCache("1.9.0");
+  assert.equal(getCachedAntigravityCliVersion(), "1.9.0");
+  clearAntigravityVersionCaches();
+});

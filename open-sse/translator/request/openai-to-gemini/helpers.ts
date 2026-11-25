@@ -76,13 +76,25 @@ export function deepCleanUndefined(value: unknown, depth = 0): void {
   }
 }
 
-export function applyAntigravityGenerationDefaults(generationConfig: GeminiGenerationConfig) {
+export function applyAntigravityGenerationDefaults(
+  generationConfig: GeminiGenerationConfig,
+  options?: { skipThinkingBudgetBump?: boolean }
+) {
   const config = { ...generationConfig };
   if (config.topK === undefined) {
     config.topK = 40;
   }
   if (config.topP === undefined) {
     config.topP = 1;
+  }
+
+  // Gemini 4 tier ids carry their rung in the model id, and the executor drops the
+  // thinkingBudget afterwards. Bumping the caller's explicit cap from a knob we are
+  // about to discard is a silent side effect (max_tokens: 16 + reasoning_effort
+  // "xhigh" became 32769), so the caller opts out for those ids. Passed in as a flag
+  // to keep this leaf dependency-free.
+  if (options?.skipThinkingBudgetBump) {
+    return config;
   }
 
   const thinkingBudget = Number(config.thinkingConfig?.thinkingBudget);

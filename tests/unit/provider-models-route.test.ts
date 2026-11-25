@@ -981,9 +981,19 @@ test("provider models route retries Antigravity discovery endpoints before retur
 
   assert.equal(response.status, 200);
   assert.equal(body.source, "api");
+  // The discovery sweep now runs once per client profile: the configured ide
+  // profile first, then cli, because the Gemini 4 Hydrogen tier ids exist only in
+  // the cli catalog and synced models replace the static rows downstream.
   assert.deepEqual(discoveryUrls, [
     "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
     "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
+    "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
+    "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
+    "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:fetchAvailableModels",
+    // ide sweep exhausted without a success, so it continues into the :models URL set
+    "https://daily-cloudcode-pa.googleapis.com/v1internal:models",
+    "https://cloudcode-pa.googleapis.com/v1internal:models",
+    "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:models",
   ]);
   assert.deepEqual(body.models, [
     // #9106: both alias ids are user-callable now, so the upstream echo survives the filter.
@@ -1042,7 +1052,11 @@ test("provider models route falls back through all Antigravity discovery endpoin
   assert.equal(response.status, 200);
   assert.equal(body.source, "local_catalog");
   assert.match(body.warning, /local catalog/i);
+  // Two sweeps (configured profile, then cli) over the same three :models URLs.
   assert.deepEqual(discoveryUrls, [
+    "https://daily-cloudcode-pa.googleapis.com/v1internal:models",
+    "https://cloudcode-pa.googleapis.com/v1internal:models",
+    "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:models",
     "https://daily-cloudcode-pa.googleapis.com/v1internal:models",
     "https://cloudcode-pa.googleapis.com/v1internal:models",
     "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:models",

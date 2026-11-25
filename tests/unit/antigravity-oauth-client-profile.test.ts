@@ -19,7 +19,7 @@ test.afterEach(() => {
 
 test("token exchange selects the IDE Node and CLI User-Agent independently", async () => {
   seedAntigravityIdeVersionCache("2.1.1");
-  seedAntigravityCliVersionCache("1.1.1");
+  seedAntigravityCliVersionCache("1.3.0");
   const userAgents: string[] = [];
 
   globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
@@ -36,7 +36,7 @@ test("token exchange selects the IDE Node and CLI User-Agent independently", asy
   );
   assert.match(
     userAgents[1],
-    /^antigravity\/cli\/1\.1\.1 \(aidev_client; os_type=.+; arch=.+; auth_method=consumer\)$/
+    /^antigravity\/cli\/1\.3\.0 \(aidev_client; os_type=.+; arch=.+; auth_method=consumer\)$/
   );
 });
 
@@ -46,7 +46,7 @@ for (const [name, provider, expectedProfile] of [
 ] as const) {
   test(`${name} post-exchange and onboarding use the selected ${expectedProfile} identity`, async () => {
     seedAntigravityIdeVersionCache("2.1.1");
-    seedAntigravityCliVersionCache("1.1.1");
+    seedAntigravityCliVersionCache("1.3.0");
     const cloudCodeHeaders: Headers[] = [];
 
     globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
@@ -81,7 +81,7 @@ for (const [name, provider, expectedProfile] of [
         );
         assert.equal(headers.get("X-Goog-Api-Client"), "gl-node/22.21.1");
       } else {
-        assert.match(headers.get("User-Agent") ?? "", /^antigravity\/cli\/1\.1\.1 /);
+        assert.match(headers.get("User-Agent") ?? "", /^antigravity\/cli\/1\.3\.0 /);
         assert.equal(headers.get("X-Goog-Api-Client"), null);
       }
       assert.equal(headers.get("Client-Metadata"), null);

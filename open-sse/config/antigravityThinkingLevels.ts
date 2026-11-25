@@ -61,25 +61,36 @@ export const ANTIGRAVITY_GEMINI4_TIER_SUFFIXES = Object.freeze([
 /**
  * Model ids whose reasoning tier is baked into the id. These need the cli surface
  * and must not be rewritten onto another id or handed a contradicting level.
+ *
+ * Matched against the four canonical Hydrogen ids from a single set rather than a
+ * family wildcard: `gemini-4-carbon-high` / `-argon-*` / `-neon-*` are `*-disabled`
+ * catalog entries this change deliberately leaves alone, and a `gemini-4-[a-z]+-(...)`
+ * pattern would have forced the cli profile on them too and stripped their thinking
+ * fields.
  */
-const GEMINI4_TIER_MODEL = /^gemini-4-[a-z]+-(low|medium|high|xhigh)$/i;
+const GEMINI4_TIER_MODEL_IDS: ReadonlySet<string> = new Set(
+  Object.values(ANTIGRAVITY_GEMINI4_TIER_MODELS)
+);
 
 export function isAntigravityGemini4TierModel(modelId: string | null | undefined): boolean {
   if (typeof modelId !== "string") return false;
-  return GEMINI4_TIER_MODEL.test(modelId.trim().split("/").pop() ?? "");
+  return GEMINI4_TIER_MODEL_IDS.has(modelId.trim().split("/").pop() ?? "");
 }
 
 /**
  * The tier a Gemini 4 tier id encodes, or null when the id does not encode one.
- * `gemini-4-hydrogen-sonar` and the `-tiered-*` variants return null.
+ * `gemini-4-hydrogen-sonar`, the `-tiered-*` variants, and every other Gemini 4
+ * family return null.
  */
 export function antigravityGemini4TierFromModelId(
   modelId: string | null | undefined
 ): AntigravityGemini4Tier | null {
   if (!isAntigravityGemini4TierModel(modelId)) return null;
   const bare = (modelId as string).trim().split("/").pop()!.toLowerCase();
-  const match = bare.match(/^gemini-4-[a-z]+-(low|medium|high|xhigh)$/);
-  return match ? (match[1] as AntigravityGemini4Tier) : null;
+  for (const [tier, id] of Object.entries(ANTIGRAVITY_GEMINI4_TIER_MODELS)) {
+    if (id === bare) return tier as AntigravityGemini4Tier;
+  }
+  return null;
 }
 
 /**

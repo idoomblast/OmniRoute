@@ -79,10 +79,21 @@ export function filterUserCallableAntigravityModels(
   return models.filter(
     (model) =>
       model.isInternal !== true &&
+      !isDisabledAntigravityModelId(model.id) &&
       (provider === "agy"
         ? isDiscoverableAgyModelId(model.id)
         : isDiscoverableAntigravityModelId(model.id))
   );
+}
+
+/**
+ * `gemini-4-carbon-disabled`, `gemini-4-argon-disabled`, and `gemini-4-neon-disabled`
+ * are advertised by the cli catalog for accounts that are NOT entitled to them. They
+ * carry no quota and answer 404 on generation, so they must never reach the public
+ * catalog even when the upstream forgets to flag them `isInternal`.
+ */
+export function isDisabledAntigravityModelId(modelId: string): boolean {
+  return /-disabled$/i.test(modelId.trim());
 }
 
 export function mapAntigravityModelForClient(
@@ -127,48 +138,87 @@ export async function fetchAntigravityDiscoveryModelsCached(
       );
     }
 
-    for (const discoveryUrl of [
-      ...getAntigravityFetchAvailableModelsUrls(),
-      ...getAntigravityModelsDiscoveryUrls(),
-    ]) {
-      try {
-        const response = await safeOutboundFetch(discoveryUrl, {
-          ...SAFE_OUTBOUND_FETCH_PRESETS.modelsDiscovery,
-          guard: getProviderOutboundGuard(),
-          proxyConfig: proxy,
-          method: "POST",
-          headers: getAntigravityContentHeaders(profile, accessToken),
-          body: JSON.stringify({}),
-        });
+    // Gemini 4 Hydrogen tier ids (low|medium|high|xhigh) are only advertised by the
+    // cli catalog: the ide catalog lists 17 models and contains none of them. Synced
+    // models REPLACE the static catalog downstream, so a purely ide-profile sync
+    // silently drops all four tiers from /v1/models. Merge the cli catalog's
+    // account-entitled tier ids in without disturbing the connection's stored profile
+    // or replacing unrelated ide models.
+    const keys = profile === "cli" ? ["cli"] : [profile, "cli"];
+    const merged: Array<{ id: string; name: string }> = [];
+    const seen = new Set<string>();
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.warn(
-            `[models] ${provider} discovery failed at ${discoveryUrl} (${response.status}): ${errorText}`
-          );
-          continue;
-        }
-
-        const models = filterUserCallableAntigravityModels(
-          normalizeAntigravityModelsResponse(await response.json()),
-          provider
-        ).map((model) => mapAntigravityModelForClient(model, provider));
-        if (models.length > 0) {
-          return models;
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.warn(`[models] ${provider} discovery threw for ${discoveryUrl}: ${message}`);
+    for (const key of keys) {
+      const models = await discoverAntigravityModelsForKey(
+        key as AntigravityClientProfile,
+        accessToken,
+        proxy,
+        provider
+      );
+      for (const model of models) {
+        if (seen.has(model.id)) continue;
+        seen.add(model.id);
+        merged.push(model);
       }
     }
 
-    return [];
+    return merged;
   })().finally(() => {
     antigravityDiscoveryInflight.delete(cacheKey);
   });
 
   antigravityDiscoveryInflight.set(cacheKey, promise);
   return promise;
+}
+
+/**
+ * One discovery pass for a single client profile. Returns models mapped into the
+ * client namespace, or an empty list when every discovery URL fails.
+ */
+async function discoverAntigravityModelsForKey(
+  profile: AntigravityClientProfile,
+  accessToken: string,
+  proxy: unknown,
+  provider: "antigravity" | "agy"
+): Promise<Array<{ id: string; name: string }>> {
+  await resolveAntigravityClientVersion(profile);
+
+  for (const discoveryUrl of [
+    ...getAntigravityFetchAvailableModelsUrls(),
+    ...getAntigravityModelsDiscoveryUrls(),
+  ]) {
+    try {
+      const response = await safeOutboundFetch(discoveryUrl, {
+        ...SAFE_OUTBOUND_FETCH_PRESETS.modelsDiscovery,
+        guard: getProviderOutboundGuard(),
+        proxyConfig: proxy,
+        method: "POST",
+        headers: getAntigravityContentHeaders(profile, accessToken),
+        body: JSON.stringify({}),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.warn(
+          `[models] ${provider} discovery failed at ${discoveryUrl} (${response.status}): ${errorText}`
+        );
+        continue;
+      }
+
+      const models = filterUserCallableAntigravityModels(
+        normalizeAntigravityModelsResponse(await response.json()),
+        provider
+      ).map((model) => mapAntigravityModelForClient(model, provider));
+      if (models.length > 0) {
+        return models;
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[models] ${provider} discovery threw for ${discoveryUrl}: ${message}`);
+    }
+  }
+
+  return [];
 }
 
 export function normalizeDataRobotCatalogResponse(

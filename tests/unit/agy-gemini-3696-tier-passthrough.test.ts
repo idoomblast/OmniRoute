@@ -19,11 +19,10 @@ test("(#3696) non-tiered ANTIGRAVITY_PUBLIC_MODELS entries resolve to distinct u
   const collisions: string[] = [];
   for (const model of ANTIGRAVITY_PUBLIC_MODELS) {
     // Gemini 3.7 Flash tiers intentionally share the upstream `gemini-3.7-flash-tiered`
-    // endpoint with different reasoning token budgets. Gemini 4 Hydrogen collapses the
-    // whole family onto the single live id `gemini-4-hydrogen-sonar`, with the tier
-    // selected per request through thinkingConfig.thinkingLevel.
+    // endpoint with different reasoning token budgets. Gemini 4 Hydrogen does NOT
+    // collapse: each rung (low|medium|high|xhigh) is its own upstream id, so it is
+    // held to the same collision guard as every other family.
     if (model.id.startsWith("gemini-3.7-flash")) continue;
-    if (model.id.startsWith("gemini-4-hydrogen")) continue;
     const upstream = resolveAntigravityModelId(model.id);
     if (seen.has(upstream)) {
       collisions.push(`${model.id} and ${seen.get(upstream)} both resolve to "${upstream}"`);

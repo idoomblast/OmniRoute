@@ -266,6 +266,35 @@ function getRequestTargetModel(body: Record<string, unknown>): string {
   return typeof target === "string" && target.length > 0 ? target : "unknown";
 }
 
+/**
+ * Credentials whose client profile can actually serve the model on the wire.
+ *
+ * The profile MUST be chosen from the id the upstream will see, not from the name
+ * the client sent: `gemini-4-hydrogen-extra` resolves to `gemini-4-hydrogen-xhigh`
+ * during transform, and the ide surface answers 404 for that tier id. Selecting
+ * from the requested alias would send the alias's tiers with ide headers.
+ *
+ * `wireModel` comes from the serialized body's envelope `model` field, so it is
+ * already alias-resolved. `requestedModel` is only a fallback for the (defensive)
+ * case where the body carries no model.
+ */
+export function resolveAntigravityEffectiveCredentials(
+  credentials: AntigravityCredentials,
+  wireModel: string | null | undefined,
+  requestedModel?: string | null | undefined
+): AntigravityCredentials {
+  const profile =
+    resolveAntigravityClientProfileForModel(wireModel) ??
+    resolveAntigravityClientProfileForModel(requestedModel);
+  if (!profile) return credentials;
+  // `getAntigravityClientProfile` reads providerSpecificData.clientProfile and
+  // nothing else, so that is the only field that has to move.
+  return {
+    ...credentials,
+    providerSpecificData: { ...(credentials.providerSpecificData ?? {}), clientProfile: profile },
+  };
+}
+
 /** Sanitize unsupported schema metadata, then apply credits-first injection for one attempt. */
 export function finalizeAntigravityRequestBody(
   transformed: Record<string, unknown>,
@@ -341,9 +370,15 @@ export async function sendAntigravityRequest(
   // profile — the ide surface answers 404 "Requested entity was not found" for them
   // and its catalog does not even list them. Force the profile per request for those
   // ids only; every other model keeps the connection's configured fingerprint.
-  const effectiveCredentials = resolveAntigravityClientProfileForModel(model)
-    ? { ...credentials, clientProfile: "cli", providerSpecificData: { clientProfile: "cli" } }
-    : credentials;
+  //
+  // The profile is selected from the WIRE model (the serialized envelope's `model`,
+  // already alias-resolved) rather than the requested name, so display aliases like
+  // `gemini-4-hydrogen-extra` get the cli fingerprint too.
+  const effectiveCredentials = resolveAntigravityEffectiveCredentials(
+    credentials,
+    getRequestTargetModel(transformedBody),
+    model
+  );
   const clientProfile = applyAntigravityClientProfileHeaders(
     finalHeaders,
     effectiveCredentials,
@@ -421,7 +456,18 @@ export async function tryCreditsRetry(
   );
   const serializedCreditsRequest = serializeAntigravityRequest(provider, headers, creditsBody);
   const finalCreditsHeaders = serializedCreditsRequest.headers;
-  applyAntigravityClientProfileHeaders(finalCreditsHeaders, credentials, creditsBody);
+  // Same effective-profile selection as the initial send: the credits retry must
+  // carry the cli fingerprint for a Gemini 4 tier id, otherwise the retry re-sends
+  // the tier with the connection's ide identity and gets a 404.
+  applyAntigravityClientProfileHeaders(
+    finalCreditsHeaders,
+    resolveAntigravityEffectiveCredentials(
+      credentials,
+      getRequestTargetModel(creditsBody),
+      getRequestTargetModel(transformedBody)
+    ),
+    creditsBody
+  );
   try {
     await prl.captureCurrentProviderBody(
       url,

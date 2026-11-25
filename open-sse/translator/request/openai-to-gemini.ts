@@ -40,6 +40,7 @@ import {
   escapeHistoricalContextContent,
   buildHistoricalToolResultContext,
 } from "./openai-to-gemini/helpers.ts";
+import { isAntigravityGemini4TierModel } from "../../config/antigravityThinkingLevels.ts";
 
 // Observed Antigravity wrapper output cap, not an underlying model capability.
 // Keep this bridge-local: Antigravity currently caps visible output around 16K.
@@ -727,7 +728,11 @@ function wrapInCloudCodeEnvelope(model, cloudCodeRequest, credentials = null) {
       sessionId: getAntigravitySessionId(credentials),
       contents: cloudCodeRequest.contents,
       systemInstruction: cloudCodeRequest.systemInstruction,
-      generationConfig: applyAntigravityGenerationDefaults(cloudCodeRequest.generationConfig),
+      generationConfig: applyAntigravityGenerationDefaults(cloudCodeRequest.generationConfig, {
+        // Gemini 4 tier ids select their rung by model id and have the derived
+        // thinkingBudget stripped later, so an ignored knob must not raise the cap.
+        skipThinkingBudgetBump: isAntigravityGemini4TierModel(cleanModel),
+      }),
       tools: cloudCodeRequest.tools,
       safetySettings: cloudCodeRequest.safetySettings,
     },

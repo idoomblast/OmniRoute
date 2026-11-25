@@ -220,3 +220,156 @@ test("Gemini 4 tier ids carry specs and pricing rows", () => {
     assert.equal(row.cached, 0.075, modelId);
   }
 });
+
+// ── Regressions from reviewer gate round 1 (FAIL) ────────────────────────────
+//
+// Each test below pins one hole the gate found. They are intentionally written
+// against the SAME seams the reviewer used (wire model vs requested name, the
+// credits retry, the sync catalog, the runtime cost path), because a fix that only
+// satisfies the first-attempt literal-id case was exactly the gap.
+
+test("F5: tier detection is a canonical id set, not a family wildcard", () => {
+  // A `gemini-4-[a-z]+-(low|medium|high|xhigh)` pattern matched carbon/argon/neon,
+  // which made the executor force the cli profile on them and strip their thinking
+  // fields — a contract violation for models this change must leave alone.
+  for (const id of [
+    "gemini-4-carbon-high",
+    "gemini-4-carbon-xhigh",
+    "gemini-4-argon-low",
+    "gemini-4-neon-medium",
+    "gemini-4-hydrogen-sonar-high",
+  ]) {
+    assert.equal(isAntigravityGemini4TierModel(id), false, `${id} must not be a tier id`);
+    assert.equal(resolveAntigravityClientProfileForModel(id), null, `${id} keeps its profile`);
+  }
+});
+
+test("F1: the client profile is chosen from the WIRE model, not the requested name", async () => {
+  // `gemini-4-hydrogen-extra` is not a tier id itself: it resolves to
+  // `gemini-4-hydrogen-xhigh` during transform. Selecting the profile from the
+  // requested name sent XHigh with ide headers and got a 404.
+  const { resolveAntigravityEffectiveCredentials } =
+    await import("../../open-sse/executors/antigravity/executeAttempt.ts");
+  const ideCreds = { accessToken: "t", providerSpecificData: { clientProfile: "ide" } };
+
+  // Wire model wins even when the requested name is a display alias.
+  const viaAlias = resolveAntigravityEffectiveCredentials(
+    ideCreds,
+    "gemini-4-hydrogen-xhigh",
+    "gemini-4-hydrogen-extra"
+  );
+  assert.equal(viaAlias.providerSpecificData?.clientProfile, "cli");
+
+  // A non-tier wire model keeps the connection profile even if the requested name
+  // happened to look like a tier id (defensive ordering pin).
+  const nonTier = resolveAntigravityEffectiveCredentials(ideCreds, "gemini-3.8-flash-high", null);
+  assert.equal(nonTier, ideCreds, "non-tier model must keep the configured credentials");
+
+  // -sonar is a real model but not a tier id: it must never be forced to cli.
+  const sonar = resolveAntigravityEffectiveCredentials(
+    ideCreds,
+    "gemini-4-hydrogen-sonar",
+    "gemini-4-hydrogen-sonar"
+  );
+  assert.equal(sonar, ideCreds);
+});
+
+test("NB2: a discarded thinking budget must not raise the caller's explicit cap", async () => {
+  const executor = new AntigravityExecutor();
+  const result = await executor.transformRequest(
+    "gemini-4-hydrogen-xhigh",
+    {
+      model: "gemini-4-hydrogen-xhigh",
+      request: {
+        contents: [{ role: "user", parts: [{ text: "Hello" }] }],
+        generationConfig: {
+          maxOutputTokens: 16,
+          thinkingConfig: { thinkingBudget: 32768, includeThoughts: true },
+        },
+      },
+    },
+    true,
+    { projectId: "project-1" }
+  );
+
+  if (result instanceof Response) throw new Error("Unexpected Response from transformRequest");
+  const generationConfig = (
+    result.request as { generationConfig?: { maxOutputTokens?: number; thinkingConfig?: unknown } }
+  ).generationConfig;
+  // 16 was the caller's explicit cap; the budget is dropped, so it must not become
+  // 32769 on the way out.
+  assert.equal(generationConfig?.maxOutputTokens, 16);
+  assert.equal(
+    "thinkingBudget" in ((generationConfig?.thinkingConfig ?? {}) as Record<string, unknown>),
+    false
+  );
+});
+
+test("NB3: the extra/max display aliases carry the XHigh spec, not the Low spec", () => {
+  assert.equal(getModelSpec("gemini-4-hydrogen-extra")?.maxOutputTokens, 262144);
+  assert.equal(getModelSpec("gemini-4-hydrogen-max")?.maxOutputTokens, 262144);
+  // The XHigh spec is the one that owns them; Low owns only itself.
+  const lowAliases = (getModelSpec("gemini-4-hydrogen-low") as { aliases?: string[] })?.aliases;
+  assert.equal(lowAliases, undefined, "Low must not advertise the extra/max aliases");
+});
+
+test("NB4: no catalog entry collapses onto -sonar (collision guard not exempted)", () => {
+  // The previous exemption let a future alias collide silently.
+  const seen = new Map<string, string>();
+  for (const model of ANTIGRAVITY_PUBLIC_MODELS) {
+    if (model.id.startsWith("gemini-3.7-flash")) continue;
+    const upstream = resolveAntigravityModelId(model.id);
+    assert.equal(seen.has(upstream), false, `${model.id} collides with ${seen.get(upstream)}`);
+    seen.set(upstream, model.id);
+  }
+});
+
+test("F3: the *-disabled catalog entries never reach the client", async () => {
+  const { filterUserCallableAntigravityModels, isDisabledAntigravityModelId } =
+    await import("../../src/app/api/providers/[id]/models/discovery/normalizers.ts");
+  // The cli catalog advertises these for unentitled accounts; they answer 404.
+  for (const id of [
+    "gemini-4-carbon-disabled",
+    "gemini-4-argon-disabled",
+    "gemini-4-neon-disabled",
+  ]) {
+    assert.equal(isDisabledAntigravityModelId(id), true, id);
+  }
+  assert.equal(isDisabledAntigravityModelId("gemini-4-hydrogen-xhigh"), false);
+
+  const filtered = filterUserCallableAntigravityModels(
+    [
+      { id: "gemini-4-hydrogen-xhigh", name: "XHigh" },
+      { id: "gemini-4-carbon-disabled", name: "Carbon" },
+      { id: "gemini-4-neon-disabled", name: "Neon" },
+      // Not flagged isInternal on purpose: the upstream does not always set it.
+    ],
+    "antigravity"
+  );
+  assert.deepEqual(
+    filtered.map((m) => m.id),
+    ["gemini-4-hydrogen-xhigh"]
+  );
+});
+
+test("F4: the routed antigravity/agy providers reach the ag pricing rows", async () => {
+  const { getPricingForModel } = await import("../../src/lib/db/settings/pricing.ts");
+
+  // Both public prefixes must resolve — `ag` was an orphan namespace reachable from
+  // neither, so cost/quota accounting silently returned $0.
+  for (const provider of ["antigravity", "agy", "ag"]) {
+    for (const model of ["gemini-4-hydrogen-xhigh", "gemini-4-hydrogen-low"]) {
+      const row = await getPricingForModel(provider, model);
+      assert.ok(row, `${provider}/${model} must resolve to a pricing row`);
+      assert.equal(row?.input, 1.5, `${provider}/${model}`);
+      assert.equal(row?.output, 7.5, `${provider}/${model}`);
+    }
+  }
+
+  // Display aliases bill as the tier they route to.
+  for (const alias of ["gemini-4-hydrogen-extra", "gemini-4-hydrogen-max", "gemini-4-hydrogen"]) {
+    const row = await getPricingForModel("antigravity", alias);
+    assert.ok(row, `antigravity/${alias} must bill as its tier id`);
+    assert.equal(row?.input, 1.5, alias);
+  }
+});

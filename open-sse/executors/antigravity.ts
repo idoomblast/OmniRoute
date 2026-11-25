@@ -311,7 +311,13 @@ function applyAntigravityGenerationDefaults(
       : null;
   const thinkingBudget = Number(thinkingConfig?.thinkingBudget);
   const maxOutputTokens = Number(generationConfig.maxOutputTokens);
+  // Gemini 4 tier ids carry their rung in the model id, and `preserve...` drops the
+  // thinkingBudget afterwards. Letting a knob we are about to discard raise the
+  // caller's explicit cap would be a silent side effect: an OpenAI request with
+  // `max_tokens: 16` + `reasoning_effort: "xhigh"` turned into maxOutputTokens 32769.
+  const budgetsOwnedByModelId = isAntigravityGemini4TierModel(modelId);
   if (
+    !budgetsOwnedByModelId &&
     Number.isFinite(thinkingBudget) &&
     thinkingBudget > 0 &&
     (!Number.isFinite(maxOutputTokens) || maxOutputTokens <= thinkingBudget)

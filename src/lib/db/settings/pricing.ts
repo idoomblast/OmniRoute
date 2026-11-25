@@ -6,7 +6,18 @@ import { getDbInstance } from "../core";
 import { backupDbFile } from "../backup";
 import { invalidateDbCache } from "../readCache";
 import { PROVIDER_ID_TO_ALIAS } from "@omniroute/open-sse/config/providerModels.ts";
+import { resolveAntigravityModelId } from "@omniroute/open-sse/config/antigravityModelAliases.ts";
 import { type JsonRecord, toRecord } from "./shared";
+
+/**
+ * Providers that bill under a pricing namespace that their registry alias does not
+ * point at. `ag` is the shared Antigravity/AGY price table, but `antigravity` declares
+ * no alias and `agy` maps to itself, so the generic alias walk never reaches it.
+ */
+const PRICING_PROVIDER_NAMESPACE: Record<string, string> = {
+  antigravity: "ag",
+  agy: "ag",
+};
 
 type PricingModels = Record<string, JsonRecord>;
 type PricingByProvider = Record<string, PricingModels>;
@@ -152,6 +163,16 @@ export async function getPricingForModel(provider: string, model: string) {
     }
   }
 
+  // Both Antigravity OAuth providers bill under the shared `ag` pricing namespace,
+  // but neither declares `ag` as its alias (`antigravity` has no alias at all and
+  // `agy` maps to itself). Without this mapping every Antigravity model — including
+  // the Gemini 4 Hydrogen tiers — resolves to null and cost/quota accounting silently
+  // falls back to $0.
+  if (!providerPricing) {
+    const namespace = PRICING_PROVIDER_NAMESPACE[pLower];
+    if (namespace) providerPricing = findKeyInsensitive(pricing, namespace);
+  }
+
   if (!providerPricing) {
     const np = pLower.replace(/-cn$/, "");
     if (np && np !== pLower) {
@@ -162,7 +183,14 @@ export async function getPricingForModel(provider: string, model: string) {
   if (!providerPricing) return null;
 
   const mLower = (model || "").toLowerCase();
-  let modelPricing = findKeyInsensitive<JsonRecord>(providerPricing, mLower);
+  // Display aliases (`gemini-4-hydrogen`, `-extra`, `-max`) bill as the tier id they
+  // route to, so resolve through the same alias table the executor uses.
+  const canonicalModel = resolveAntigravityModelId(mLower);
+  let modelPricing = findKeyInsensitive<JsonRecord>(providerPricing, canonicalModel);
+
+  if (!modelPricing && canonicalModel !== mLower) {
+    modelPricing = findKeyInsensitive<JsonRecord>(providerPricing, mLower);
+  }
 
   if (!modelPricing) {
     const hyphenModel = mLower.replace(/\./g, "-");

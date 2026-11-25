@@ -240,6 +240,10 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
     supportsThinking: true,
     supportsTools: true,
     supportsVision: true,
+    // The client-facing "extra"/"max" names are the fourth rung, so they carry the
+    // XHigh spec — classifying them under Low made metadata lookups disagree with
+    // the id the executor actually sends.
+    aliases: ["gemini-4-hydrogen-extra", "gemini-4-hydrogen-max"],
   },
   "gemini-4-hydrogen-high": {
     maxOutputTokens: 262144,
@@ -261,7 +265,6 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
     supportsThinking: true,
     supportsTools: true,
     supportsVision: true,
-    aliases: ["gemini-4-hydrogen-extra", "gemini-4-hydrogen-max"],
   },
   "gemini-4-hydrogen-sonar": {
     maxOutputTokens: 65536,

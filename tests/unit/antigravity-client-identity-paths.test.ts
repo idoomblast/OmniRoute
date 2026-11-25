@@ -36,10 +36,10 @@ test.after(() => {
 });
 
 test("executor token refresh uses the selected CLI identity", async () => {
-  seedAntigravityCliVersionCache("1.1.1");
+  seedAntigravityCliVersionCache("1.2.8");
   globalThis.fetch = async (url, init) => {
     assert.match(String(url), /oauth2\.googleapis\.com\/token$/);
-    assert.equal(new Headers(init?.headers).get("User-Agent"), antigravityCliUserAgent("1.1.1"));
+    assert.equal(new Headers(init?.headers).get("User-Agent"), antigravityCliUserAgent("1.2.8"));
     return Response.json({
       access_token: "new-token",
       refresh_token: "new-refresh",
@@ -62,7 +62,7 @@ test("executor token refresh uses the selected CLI identity", async () => {
 
 test("credits retry keeps the selected CLI identity after fingerprint serialization", async () => {
   const calls: Array<{ body: Record<string, unknown>; headers: Headers }> = [];
-  seedAntigravityCliVersionCache("1.1.1");
+  seedAntigravityCliVersionCache("1.2.8");
   setCliCompatProviders(["antigravity"]);
   process.env.ANTIGRAVITY_CREDITS = "retry";
 
@@ -96,14 +96,14 @@ test("credits retry keeps the selected CLI identity after fingerprint serializat
   assert.equal(calls.length, 2);
   assert.deepEqual(calls[1].body.enabledCreditTypes, ["GOOGLE_ONE_AI"]);
   for (const call of calls) {
-    assert.equal(call.headers.get("User-Agent"), antigravityCliUserAgent("1.1.1"));
+    assert.equal(call.headers.get("User-Agent"), antigravityCliUserAgent("1.2.8"));
     assert.equal(call.headers.get("x-client-name"), null);
     assert.equal(call.headers.get("X-Goog-Api-Client"), null);
   }
 });
 
 test("image generation forwards the selected CLI identity and public envelope", async () => {
-  seedAntigravityCliVersionCache("1.1.1");
+  seedAntigravityCliVersionCache("1.2.8");
   let capturedHeaders = new Headers();
   let capturedBody: Record<string, unknown> = {};
   globalThis.fetch = async (_url, init) => {
@@ -137,7 +137,7 @@ test("image generation forwards the selected CLI identity and public envelope", 
   });
 
   assert.equal(result.success, true);
-  assert.equal(capturedHeaders.get("User-Agent"), antigravityCliUserAgent("1.1.1"));
+  assert.equal(capturedHeaders.get("User-Agent"), antigravityCliUserAgent("1.2.8"));
   assert.equal(capturedHeaders.get("x-client-name"), null);
   assert.equal(capturedHeaders.get("X-Goog-Api-Client"), null);
   assert.equal(capturedBody.userAgent, "antigravity");

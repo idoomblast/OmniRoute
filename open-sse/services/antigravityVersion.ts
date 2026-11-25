@@ -167,7 +167,13 @@ export function getCachedAntigravityIdeVersion(): string {
 }
 
 export function getCachedAntigravityCliVersion(): string {
-  return cliState.cache?.version ?? ANTIGRAVITY_CLI_FALLBACK_VERSION;
+  // Apply the floor on the read path, not just on the resolve path: a cache seeded
+  // below 1.2.8 (a stale feed, a seeded test, an old release) must never reach the
+  // wire for a Gemini 4 tier id, which only 1.2.8+ serves.
+  return (
+    pickNewestVersion(cliState.cache?.version, ANTIGRAVITY_CLI_FALLBACK_VERSION) ??
+    ANTIGRAVITY_CLI_FALLBACK_VERSION
+  );
 }
 
 export function seedAntigravityIdeVersionCache(version: string, fetchedAt = Date.now()): void {

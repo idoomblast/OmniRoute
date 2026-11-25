@@ -47,13 +47,13 @@ test("User-Agent OS/arch token stays pinned to darwin/arm64 regardless of host (
 
 test("IDE and CLI content headers use independent cached versions", () => {
   seedAntigravityIdeVersionCache("2.2.0");
-  seedAntigravityCliVersionCache("1.2.0");
+  seedAntigravityCliVersionCache("1.3.0");
 
   const ideHeaders = new Headers(getAntigravityContentHeaders("ide", "ide-token"));
   const cliHeaders = new Headers(getAntigravityContentHeaders("cli", "cli-token"));
 
   assert.match(ideHeaders.get("User-Agent") ?? "", /^antigravity\/ide\/2\.2\.0 /);
-  assert.match(cliHeaders.get("User-Agent") ?? "", /^antigravity\/cli\/1\.2\.0 /);
+  assert.match(cliHeaders.get("User-Agent") ?? "", /^antigravity\/cli\/1\.3\.0 /);
   assert.equal(ideHeaders.get("Authorization"), "Bearer ide-token");
   assert.equal(cliHeaders.get("Authorization"), "Bearer cli-token");
 
@@ -86,13 +86,13 @@ test("IDE Node OAuth and onboarding headers use the captured Google Node identit
 
 test("OAuth User-Agent selection keeps IDE and CLI identities independent", () => {
   seedAntigravityIdeVersionCache("2.2.0");
-  seedAntigravityCliVersionCache("1.2.0");
+  seedAntigravityCliVersionCache("1.3.0");
 
   assert.match(
     getAntigravityOAuthUserAgent("ide"),
     /^antigravity\/2\.2\.0 [^ ]+\/[^ ]+ google-api-nodejs-client\/10\.3\.0$/
   );
-  assert.match(getAntigravityOAuthUserAgent("cli"), /^antigravity\/cli\/1\.2\.0 /);
+  assert.match(getAntigravityOAuthUserAgent("cli"), /^antigravity\/cli\/1\.3\.0 /);
 });
 
 test("loadCodeAssist body metadata remains ideType only", () => {

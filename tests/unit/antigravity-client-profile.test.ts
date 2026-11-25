@@ -104,7 +104,7 @@ function applyProfile(profile: AntigravityClientProfile): Record<string, string>
 
 test("content header application emits IDE and CLI identities and strips fake headers", () => {
   seedAntigravityIdeVersionCache("2.1.1");
-  seedAntigravityCliVersionCache("1.1.1");
+  seedAntigravityCliVersionCache("1.3.0");
 
   const ideHeaders = applyProfile("ide");
   const cliHeaders = applyProfile("cli");
@@ -113,7 +113,7 @@ test("content header application emits IDE and CLI identities and strips fake he
   assert.match(ideHeaders["User-Agent"], / darwin\/arm64$| windows\/amd64$| linux\/[^ ]+$/);
   assert.match(
     cliHeaders["User-Agent"],
-    /^antigravity\/cli\/1\.1\.1 \(aidev_client; os_type=.+; arch=.+; auth_method=consumer\)$/
+    /^antigravity\/cli\/1\.3\.0 \(aidev_client; os_type=.+; arch=.+; auth_method=consumer\)$/
   );
   assertIdentityHeadersAbsent(ideHeaders);
   assertIdentityHeadersAbsent(cliHeaders);
