@@ -394,6 +394,49 @@ export const DEFAULT_PRICING_OAUTH = {
       reasoning: 7.5,
       cache_creation: 1.5,
     },
+    // Gemini 4 Hydrogen (Antigravity Cloud Code). The tier ids are priced as one
+    // model — $1.50 input / $7.50 output / $0.075 cached per MTok (LiteLLM
+    // gemini/gemini-4-hydrogen and vertex_ai/gemini-4-hydrogen agree);
+    // `gemini-4-hydrogen-sonar` is priced from LiteLLM gmi/google/gemini-4-hydrogen
+    // (the smaller-output surface). Carbon ($2/$10) and Neon ($3/$15) are only
+    // `*-disabled` catalog entries, so no rows are registered for them. Without
+    // these rows getPricingForModel("ag", id) returns null and cost / quota
+    // calculations silently fall back to $0.
+    "gemini-4-hydrogen-xhigh": {
+      input: 1.5,
+      output: 7.5,
+      cached: 0.075,
+      reasoning: 7.5,
+      cache_creation: 1.5,
+    },
+    "gemini-4-hydrogen-high": {
+      input: 1.5,
+      output: 7.5,
+      cached: 0.075,
+      reasoning: 7.5,
+      cache_creation: 1.5,
+    },
+    "gemini-4-hydrogen-medium": {
+      input: 1.5,
+      output: 7.5,
+      cached: 0.075,
+      reasoning: 7.5,
+      cache_creation: 1.5,
+    },
+    "gemini-4-hydrogen-low": {
+      input: 1.5,
+      output: 7.5,
+      cached: 0.075,
+      reasoning: 7.5,
+      cache_creation: 1.5,
+    },
+    "gemini-4-hydrogen-sonar": {
+      input: 1.5,
+      output: 7.5,
+      cached: 0.075,
+      reasoning: 7.5,
+      cache_creation: 1.5,
+    },
     // Gemini 3.8 Flash (live Antigravity/AGY tiers) — same tier pricing as 3.7.
     "gemini-3.8-flash-low": {
       input: 1.5,

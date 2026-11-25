@@ -25,7 +25,7 @@ test("IDE and CLI start with independent captured fallback versions", () => {
   assert.equal(getCachedAntigravityIdeVersion(), ANTIGRAVITY_IDE_FALLBACK_VERSION);
   assert.equal(getCachedAntigravityCliVersion(), ANTIGRAVITY_CLI_FALLBACK_VERSION);
   assert.equal(ANTIGRAVITY_IDE_FALLBACK_VERSION, "2.8.1");
-  assert.equal(ANTIGRAVITY_CLI_FALLBACK_VERSION, "1.1.13");
+  assert.equal(ANTIGRAVITY_CLI_FALLBACK_VERSION, "1.2.8");
 });
 
 test("IDE resolver reads the official updater feed and caches only the IDE version", async () => {
@@ -46,7 +46,7 @@ test("IDE resolver reads the official updater feed and caches only the IDE versi
     "https://antigravity-auto-updater-974169037036.us-central1.run.app/releases"
   );
   assert.equal(getCachedAntigravityIdeVersion(), "3.0.0");
-  assert.equal(getCachedAntigravityCliVersion(), "1.1.13");
+  assert.equal(getCachedAntigravityCliVersion(), "1.2.8");
 });
 
 test("IDE resolver selects the newest feed entry and never falls below its version floor", async () => {
@@ -97,27 +97,41 @@ test("CLI resolver reads the official Google GitHub release and caches only the 
   const urls: string[] = [];
   const fetchMock = async (url: string | URL | Request) => {
     urls.push(String(url));
-    return new Response(JSON.stringify({ tag_name: "v1.2.0", name: "1.2.0" }), {
+    return new Response(JSON.stringify({ tag_name: "v1.5.17", name: "1.5.17" }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
   };
 
-  assert.equal(await resolveAntigravityCliVersion(fetchMock as typeof fetch), "1.2.0");
-  assert.equal(await resolveAntigravityCliVersion(fetchMock as typeof fetch), "1.2.0");
+  // The resolver takes the newest of (feed, cache, fallback); the feed wins here.
+  assert.equal(await resolveAntigravityCliVersion(fetchMock as typeof fetch), "1.5.17");
+  assert.equal(await resolveAntigravityCliVersion(fetchMock as typeof fetch), "1.5.17");
   assert.equal(urls.length, 1);
   assert.equal(
     urls[0],
     "https://api.github.com/repos/google-antigravity/antigravity-cli/releases/latest"
   );
-  assert.equal(getCachedAntigravityCliVersion(), "1.2.0");
+  assert.equal(getCachedAntigravityCliVersion(), "1.5.17");
   assert.equal(getCachedAntigravityIdeVersion(), "2.8.1");
+});
+
+test("CLI resolver never drops below the Gemini 4 tier floor", async () => {
+  // A stale feed advertising an older CLI must not lower the identity below 1.2.8,
+  // the first version that serves the Gemini 4 Hydrogen tier ids (older ones 404).
+  const staleFeedFetch = async () =>
+    new Response(JSON.stringify({ tag_name: "v1.2.0", name: "1.2.0" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  assert.equal(await resolveAntigravityCliVersion(staleFeedFetch as typeof fetch), "1.2.8");
+  assert.equal(getCachedAntigravityCliVersion(), "1.2.8");
 });
 
 test("IDE and CLI TTL refreshes are independent", async () => {
   let now = 1_000;
   Date.now = () => now;
-  seedAntigravityCliVersionCache("1.1.13", now);
+  seedAntigravityCliVersionCache("1.2.8", now);
 
   const firstFetch = async () =>
     new Response(JSON.stringify([{ version: "2.9.0" }]), {
@@ -133,7 +147,7 @@ test("IDE and CLI TTL refreshes are independent", async () => {
   assert.equal(await resolveAntigravityIdeVersion(firstFetch as typeof fetch), "2.9.0");
   now += ANTIGRAVITY_VERSION_CACHE_TTL_MS + 1;
   assert.equal(await resolveAntigravityIdeVersion(secondFetch as typeof fetch), "3.0.0");
-  assert.equal(getCachedAntigravityCliVersion(), "1.1.13");
+  assert.equal(getCachedAntigravityCliVersion(), "1.2.8");
 });
 
 test("each resolver falls back only to its own last known good version", async () => {

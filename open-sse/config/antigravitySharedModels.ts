@@ -5,6 +5,49 @@
 // explicit add/remove delta in its own file (currently both deltas are empty).
 
 export const ANTIGRAVITY_SHARED_MODELS = Object.freeze([
+  // Gemini 4 Hydrogen — one model id per reasoning rung, exactly like Gemini
+  // 3.7/3.8. The authoritative catalog (`:fetchAvailableModels` with the cli client
+  // profile) advertises Low/Medium/High/Extra High (`xhigh`) as separate ids at
+  // maxOutputTokens 262144, plus `gemini-4-hydrogen-sonar` as a distinct
+  // smaller-output model (65536). Tier ids are served by the cli client profile only
+  // (ide answers 404) — see antigravityThinkingLevels.ts. Carbon/Argon/Neon exist in
+  // the catalog only as `*-disabled` entries, so they are not callable.
+  {
+    id: "gemini-4-hydrogen-xhigh",
+    name: "Gemini 4 Hydrogen (Extra High)",
+    contextLength: 1048576,
+    maxOutputTokens: 262144,
+    supportsReasoning: true,
+    supportsVision: true,
+    toolCalling: true,
+  },
+  {
+    id: "gemini-4-hydrogen-high",
+    name: "Gemini 4 Hydrogen (High)",
+    contextLength: 1048576,
+    maxOutputTokens: 262144,
+    supportsReasoning: true,
+    supportsVision: true,
+    toolCalling: true,
+  },
+  {
+    id: "gemini-4-hydrogen-medium",
+    name: "Gemini 4 Hydrogen (Medium)",
+    contextLength: 1048576,
+    maxOutputTokens: 262144,
+    supportsReasoning: true,
+    supportsVision: true,
+    toolCalling: true,
+  },
+  {
+    id: "gemini-4-hydrogen-low",
+    name: "Gemini 4 Hydrogen (Low)",
+    contextLength: 1048576,
+    maxOutputTokens: 262144,
+    supportsReasoning: true,
+    supportsVision: true,
+    toolCalling: true,
+  },
   // Gemini 3.7 Flash tiers. The live endpoint selects High by default and advertises
   // all three ids to both the IDE 2.5.5 and CLI 1.1.x clients.
   {

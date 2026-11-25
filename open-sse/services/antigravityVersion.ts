@@ -9,7 +9,11 @@ export const ANTIGRAVITY_VERSION_FETCH_TIMEOUT_MS = 5_000;
 // :fetchAvailableModels (live-verified 2026-08-17). The public updater feed still
 // lags behind (max 2.0.0), so the fallback floor is what actually reaches the wire.
 export const ANTIGRAVITY_IDE_FALLBACK_VERSION = "2.8.1";
-export const ANTIGRAVITY_CLI_FALLBACK_VERSION = "1.1.13";
+// 1.2.8 is the first CLI version whose identity serves the Gemini 4 Hydrogen tier
+// ids (`gemini-4-hydrogen-{low,medium,high,xhigh}`): 1.2.7 and below answer 404
+// "Requested entity was not found" for them (live-verified 2026-11-26). The release
+// feed reports the true latest (1.5.17), so this floor only matters offline.
+export const ANTIGRAVITY_CLI_FALLBACK_VERSION = "1.2.8";
 
 type VersionCache = {
   fetchedAt: number;

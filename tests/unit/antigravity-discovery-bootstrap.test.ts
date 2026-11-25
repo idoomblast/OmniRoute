@@ -141,7 +141,7 @@ describe("ensureAntigravityProjectAssigned", () => {
 
     assert.match(
       capturedHeaders?.get("User-Agent") || "",
-      /^antigravity\/cli\/1\.1\.13 \(aidev_client; os_type=.+; arch=.+; auth_method=consumer\)$/
+      /^antigravity\/cli\/1\.2\.8 \(aidev_client; os_type=.+; arch=.+; auth_method=consumer\)$/
     );
     assert.equal(capturedHeaders?.get("X-Goog-Api-Client"), null);
     assert.equal(capturedHeaders?.get("Client-Metadata"), null);

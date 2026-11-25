@@ -19,6 +19,7 @@ import {
   applyAntigravityClientProfileHeaders,
   removeHeaderCaseInsensitive,
 } from "../../services/antigravityClientProfile.ts";
+import { resolveAntigravityClientProfileForModel } from "../../config/antigravityThinkingLevels.ts";
 import * as prl from "../../utils/providerRequestLogging.ts";
 import {
   createCreditsExtractionTransform as createCreditsExtractionTransformImpl,
@@ -336,9 +337,16 @@ export async function sendAntigravityRequest(
 ): Promise<{ response: Response; finalHeaders: Record<string, string> }> {
   const serializedRequest = serializeAntigravityRequest(provider, headers, transformedBody);
   let finalHeaders = serializedRequest.headers;
+  // Gemini 4 tier ids (low|medium|high|xhigh) are only served by the cli client
+  // profile — the ide surface answers 404 "Requested entity was not found" for them
+  // and its catalog does not even list them. Force the profile per request for those
+  // ids only; every other model keeps the connection's configured fingerprint.
+  const effectiveCredentials = resolveAntigravityClientProfileForModel(model)
+    ? { ...credentials, clientProfile: "cli", providerSpecificData: { clientProfile: "cli" } }
+    : credentials;
   const clientProfile = applyAntigravityClientProfileHeaders(
     finalHeaders,
-    credentials,
+    effectiveCredentials,
     transformedBody
   );
 

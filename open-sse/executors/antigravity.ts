@@ -28,6 +28,7 @@ import {
   resolveAntigravityModelId,
   getAntigravityModelFallbacks,
 } from "../config/antigravityModelAliases.ts";
+import { isAntigravityGemini4TierModel } from "../config/antigravityThinkingLevels.ts";
 import {
   shouldStripCloudCodeThinking,
   stripCloudCodeThinkingConfig,
@@ -336,6 +337,49 @@ function applyAntigravityGenerationDefaults(
 // without spinning up the full executor.
 export const __test_applyAntigravityGenerationDefaults = applyAntigravityGenerationDefaults;
 
+/**
+ * Keep the Gemini 4 tier ids intact on the wire.
+ *
+ * Each Gemini 4 Hydrogen rung is its own model id that carries its tier
+ * (`-low`/`-medium`/`-high`/`-xhigh`, the last being the catalog's "Extra High"),
+ * exactly like Gemini 3.7/3.8. Two things must therefore NOT happen:
+ *
+ *  - the id must not be collapsed onto `gemini-4-hydrogen-sonar`, which is a
+ *    separate smaller-output model (65536 vs 262144 tokens) that does not
+ *    implement XHIGH at all;
+ *  - no `thinkingLevel` or `thinkingBudget` may be forced onto the request, because
+ *    a level that contradicts the id is not what the official client sends and a
+ *    budget above ~24576 is read as an out-of-range level
+ *    (`32768 -> 400 "Thinking level is unsupported: THINKING_LEVEL_XHIGH"`).
+ *
+ * `includeThoughts` is preserved as sent: it is what routes the upstream thought
+ * parts to `reasoning_content` and keeps the thought signature replayable across
+ * multi-turn tool loops.
+ *
+ * Live-verified 2026-11-26 against both the antigravity and agy OAuth profiles.
+ */
+export function preserveAntigravityGemini4TierRequest(
+  request: Record<string, unknown>,
+  upstreamModelId: string | null | undefined
+): void {
+  if (!isAntigravityGemini4TierModel(upstreamModelId)) return;
+  const generationConfig = asRecord(request.generationConfig);
+  const thinkingConfig = generationConfig ? asRecord(generationConfig.thinkingConfig) : null;
+  if (!generationConfig || !thinkingConfig) return;
+
+  // Drop the level and budget the translator derived from `reasoning_effort`: the
+  // tier is already selected by the model id, and forwarding either one risks a
+  // contradiction (400) or a silent downgrade of the requested rung.
+  delete thinkingConfig.thinkingLevel;
+  delete thinkingConfig.thinkingBudget;
+
+  if (Object.keys(thinkingConfig).length === 0) {
+    delete generationConfig.thinkingConfig;
+  } else {
+    generationConfig.thinkingConfig = thinkingConfig;
+  }
+  request.generationConfig = generationConfig;
+}
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -669,6 +713,12 @@ export class AntigravityExecutor extends BaseExecutor {
       : rawTransformedRequest;
 
     applyAntigravityGenerationDefaults(transformedRequest, upstreamModel);
+
+    // Gemini 4 tier ids carry their rung in the id itself (low|medium|high|xhigh),
+    // so the level/budget the translator derived from reasoning_effort must be
+    // dropped instead of forwarded — a contradicting level or an oversized budget
+    // turns into a 400 upstream. Runs after the generation defaults.
+    preserveAntigravityGemini4TierRequest(transformedRequest, upstreamModel);
 
     // Operator-configured systemTransforms pipeline (Settings → Routing →
     // System Transforms, provider key `antigravity`). Runs on the Gemini-shaped

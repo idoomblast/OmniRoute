@@ -226,6 +226,51 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
   "gemini-3.7-flash-medium": { ...GEMINI_35_FLASH_MODEL_SPEC },
   "gemini-3.7-flash-low": { ...GEMINI_35_FLASH_MODEL_SPEC },
 
+  // ── Gemini 4 Hydrogen (current Antigravity Cloud Code live tiers) ────────
+  // ONE spec per reasoning rung, exactly like Gemini 3.7/3.8: the catalog
+  // (`:fetchAvailableModels` with the cli client profile) advertises
+  // gemini-4-hydrogen-{low,medium,high,xhigh} at maxOutputTokens 262144, where
+  // `xhigh` is the catalog's "Extra High" rung (thinkingLevel sentinel 100).
+  // `gemini-4-hydrogen-sonar` is a DISTINCT smaller-output model (65536) that does
+  // not implement XHIGH. Tier ids are served by the cli client profile only (ide
+  // answers 404). See open-sse/config/antigravityThinkingLevels.ts.
+  "gemini-4-hydrogen-xhigh": {
+    maxOutputTokens: 262144,
+    contextWindow: 1048576,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gemini-4-hydrogen-high": {
+    maxOutputTokens: 262144,
+    contextWindow: 1048576,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gemini-4-hydrogen-medium": {
+    maxOutputTokens: 262144,
+    contextWindow: 1048576,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gemini-4-hydrogen-low": {
+    maxOutputTokens: 262144,
+    contextWindow: 1048576,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    aliases: ["gemini-4-hydrogen-extra", "gemini-4-hydrogen-max"],
+  },
+  "gemini-4-hydrogen-sonar": {
+    maxOutputTokens: 65536,
+    contextWindow: 1048576,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+
   // ── Gemini 3.8 Flash (current Antigravity/AGY live tiers) ─────────
   // Served directly at its own tier ids by the live Cloud Code upstream.
   "gemini-3.8-flash-high": {

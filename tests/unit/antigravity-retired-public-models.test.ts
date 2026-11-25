@@ -32,6 +32,10 @@ const RETIRED_PUBLIC_MODELS = [
 ] as const;
 
 const EXPECTED_LEADING_MODEL_ORDER = [
+  "gemini-4-hydrogen-xhigh",
+  "gemini-4-hydrogen-high",
+  "gemini-4-hydrogen-medium",
+  "gemini-4-hydrogen-low",
   "gemini-3.7-flash-high",
   "gemini-3.7-flash-medium",
   "gemini-3.7-flash-low",

@@ -6,6 +6,17 @@ export const ANTIGRAVITY_PUBLIC_MODELS = buildSurfaceCatalog(ANTIGRAVITY_SHARED_
 });
 
 export const ANTIGRAVITY_MODEL_ALIASES = Object.freeze({
+  // Gemini 4 Hydrogen. Each rung is its own upstream model id that carries its tier
+  // (low|medium|high|xhigh — the catalog's fourth entry is "Extra High"), exactly like
+  // Gemini 3.7/3.8, so tier ids must NOT collapse onto `gemini-4-hydrogen-sonar`:
+  // -sonar is a separate smaller-output model (65536 vs 262144 output tokens) that
+  // does not implement XHIGH and answers 400 "Thinking level is unsupported:
+  // THINKING_LEVEL_XHIGH" for the fourth rung. Tier ids are served by the cli client
+  // profile only; with the ide profile they answer 404 (see
+  // antigravityThinkingLevels.ts → resolveAntigravityClientProfileForModel).
+  "gemini-4-hydrogen": "gemini-4-hydrogen-high",
+  "gemini-4-hydrogen-extra": "gemini-4-hydrogen-xhigh",
+  "gemini-4-hydrogen-max": "gemini-4-hydrogen-xhigh",
   // Gemini 3.7 Flash tiers map to the upstream tiered endpoint model; the thinking
   // budget is steered via generationConfig.thinkingConfig.thinkingBudget.
   "gemini-3.7-flash": "gemini-3.7-flash-tiered",
