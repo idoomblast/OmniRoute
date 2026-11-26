@@ -551,7 +551,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     );
     const {
       previousModels,
-      previousSyncedAvailableModels,
       persistedModels,
       importedModels,
       discoveredModels,
@@ -566,10 +565,21 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       previousSyncedAvailableModels: previousSyncedAvailableModelsForConnection,
     });
 
-    const effectiveAvailableModels =
-      discoveredModels.length > 0 ? discoveredModels : syncedAvailableModels;
+    // `importManagedModels` keeps its PREVIOUS snapshot whenever the discovered list is
+    // empty, so an authoritative empty sync would be reported as "N models, no changes"
+    // while the rows it replaced are gone and nothing is logged. The post-sync state is
+    // whatever is stored now, so read it back and diff against the pre-sync snapshot.
+    let effectiveAvailableModels: Awaited<
+      ReturnType<typeof getSyncedAvailableModelsForConnection>
+    > = discoveredModels.length > 0 ? discoveredModels : syncedAvailableModels;
+    try {
+      effectiveAvailableModels = await getSyncedAvailableModelsForConnection(logProvider, id);
+    } catch {
+      /* DB read failed — fall back to what the import reported */
+    }
+
     const modelChanges = summarizeModelChanges(
-      previousSyncedAvailableModels,
+      previousSyncedAvailableModelsForConnection,
       effectiveAvailableModels
     );
     const customModelChanges = summarizeModelChanges(previousModels, persistedModels);

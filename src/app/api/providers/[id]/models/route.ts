@@ -106,6 +106,8 @@ import {
 import {
   DEGRADED_TIER_WARNING,
   fetchAntigravityDiscoveryModelsCached,
+  hasCatalogCollection,
+  hasErrorEnvelope,
   mergeLastKnownTiers,
   normalizeDataRobotCatalogResponse,
   normalizeOpenAiLikeModelsResponse,
@@ -387,6 +389,10 @@ export async function GET(
         connectionId,
         models: cachedDiscoveryModels,
         source: "cache",
+        // A cached catalog is not a fresh sweep. model-sync must not import it: it would
+        // rewrite the managed models and the persisted MITM aliases from a snapshot that
+        // predates whatever upstream is doing right now.
+        importable: false,
         ...(warning ? { warning } : {}),
       });
 
@@ -472,12 +478,13 @@ export async function GET(
       extraPayload: Record<string, unknown> = {}
     ) => {
       if (!persistDiscovery) {
-        // Probe mode: report what upstream said, write nothing. The caller (model-sync)
-        // persists only after it has accepted the result.
+        // Probe mode: report the sweep as-is, write nothing. The caller (model-sync)
+        // persists only after it has accepted the result. No specialty merge here: sync
+        // must persist what upstream said, not a display-shaped catalog.
         return buildResponse({
           provider,
           connectionId,
-          models: mergeSpecialtyCatalogIntoLiveModels(models, provider),
+          models,
           source: "api",
           ...(warning ? { warning } : {}),
           ...extraPayload,
@@ -864,9 +871,21 @@ export async function GET(
 
           if (response.ok) {
             const data = await response.json();
-            models = isNamedOpenAIStyleProvider(provider)
+            const payloadModels = isNamedOpenAIStyleProvider(provider)
               ? normalizeOpenAiLikeModelsResponse(data, provider)
               : data.data || data.models || [];
+            // A 200 carrying an error envelope is not an empty catalog. Accepting it would
+            // break the endpoint loop and persist a wipe behind a success status.
+            if (
+              payloadModels.length === 0 &&
+              (hasErrorEnvelope(data) || !hasCatalogCollection(data))
+            ) {
+              console.warn(
+                `[models] ${provider}: ${modelsUrl} answered 200 without a catalog collection — ignoring`
+              );
+              continue;
+            }
+            models = payloadModels;
             break; // Success!
           }
 
@@ -1575,6 +1594,16 @@ export async function GET(
 
       const data = await response.json();
       const models = data.data || data.models || [];
+      // A 200 without a catalog collection is a malformed answer, not an empty catalog.
+      // Persisting it would wipe the stored rows and report "no changes".
+      if (models.length === 0 && (hasErrorEnvelope(data) || !hasCatalogCollection(data))) {
+        console.warn(
+          `[models] ${provider}: 200 without a catalog collection — not treating it as empty`
+        );
+        const fallback = buildDiscoveryFallbackResponse();
+        if (fallback) return fallback;
+        return NextResponse.json({ error: "Provider returned no model catalog" }, { status: 502 });
+      }
 
       return buildApiDiscoveryResponse(models);
     }
@@ -2009,6 +2038,16 @@ export async function GET(
 
       const data = await response.json();
       const models = data.data || data.models || [];
+      // A 200 without a catalog collection is a malformed answer, not an empty catalog.
+      // Persisting it would wipe the stored rows and report "no changes".
+      if (models.length === 0 && (hasErrorEnvelope(data) || !hasCatalogCollection(data))) {
+        console.warn(
+          `[models] ${provider}: 200 without a catalog collection — not treating it as empty`
+        );
+        const fallback = buildDiscoveryFallbackResponse();
+        if (fallback) return fallback;
+        return NextResponse.json({ error: "Provider returned no model catalog" }, { status: 502 });
+      }
 
       return buildApiDiscoveryResponse(models);
     }
@@ -2031,7 +2070,9 @@ export async function GET(
         cachedDiscoveryModels.length === cachedCatalogModels.length &&
         cachedDiscoveryModels.every((model, index) => model.id === cachedCatalogModels[index]?.id);
       const persistFilteredCacheIfNeeded = async () => {
-        if (cachedIdsMatchFinalCatalog) return;
+        // Probe mode must not write: model-sync decides whether the sweep is importable,
+        // and a cache rewrite during the probe would land before that decision.
+        if (cachedIdsMatchFinalCatalog || !persistDiscovery) return;
         await persistDiscoveredModels(provider, connectionId, cachedCatalogModels);
       };
 
@@ -2042,6 +2083,8 @@ export async function GET(
           connectionId,
           models: cachedCatalogModels,
           source: "cache",
+          // A cached catalog is not a fresh sweep: sync must not import it.
+          importable: false,
         });
       }
 
@@ -2098,6 +2141,7 @@ export async function GET(
           models: cachedCatalogModels,
           source: "cache",
           warning: "Codex live catalog unavailable — using cached catalog",
+          importable: false,
         });
       }
       return buildResponse({
@@ -2272,6 +2316,16 @@ export async function GET(
       }
 
       const data = await response.json();
+      // Same contract as the single-endpoint branches: a 200 without a catalog collection
+      // is a malformed answer, so it must not be concatenated into an empty catalog.
+      if (hasErrorEnvelope(data) || !hasCatalogCollection(data)) {
+        console.warn(
+          `[models] ${provider}: 200 without a catalog collection — not treating it as empty`
+        );
+        const fallback = buildDiscoveryFallbackResponse();
+        if (fallback) return fallback;
+        return NextResponse.json({ error: "Provider returned no model catalog" }, { status: 502 });
+      }
       const pageModels = config.parseResponse(data);
       allModels = allModels.concat(pageModels);
 

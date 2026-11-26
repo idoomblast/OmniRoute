@@ -47,6 +47,39 @@ export type AntigravityDiscoveryResult = {
 };
 
 /**
+ * Whether a catalog payload actually carries a models collection, under `data` or `models`.
+ *
+ * The generic discovery parsers read `data.data || data.models || []`, so a 200 carrying an
+ * error envelope parses to the same `[]` as an account that genuinely has nothing. Callers
+ * use this to SKIP such an endpoint instead of answering "the account has nothing" — that
+ * answer clears the stored catalog behind a 200 with no call log.
+ */
+export function hasCatalogCollection(payload: unknown): boolean {
+  // A bare array is the whole catalog (AI/ML API answers with a top-level list).
+  if (Array.isArray(payload)) return true;
+  const record = asRecord(payload);
+  // Do NOT guess the container's key. Each provider's parser owns its own shape —
+  // `data`, `models`, Cloudflare's `result`, and others — so any top-level array or
+  // object value is a collection this payload carried. An empty one is still a real
+  // answer (the account has nothing). Only a body whose every value is a scalar (e.g.
+  // `{"object":"list"}`) proves nothing and must not be read as an empty catalog.
+  return Object.values(record).some(
+    (value) => Array.isArray(value) || (typeof value === "object" && value !== null)
+  );
+}
+
+/**
+ * Whether a payload carries an error envelope instead of a catalog. Providers answer 200
+ * with `{"error": {...}}` often enough that a parser reading `data.data || data.models ||
+ * []` turns it into an empty catalog; callers check this before acting on that emptiness.
+ */
+export function hasErrorEnvelope(payload: unknown): boolean {
+  const error = asRecord(payload).error;
+  if (typeof error === "string") return error.trim().length > 0;
+  return typeof error === "object" && error !== null;
+}
+
+/**
  * Whether a discovery payload actually carries a models collection. `models` may be an
  * array or an id→model map, and BOTH are valid even when empty — an account with nothing
  * entitled is a real answer that the caller must persist, or the previous catalog would

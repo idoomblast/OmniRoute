@@ -134,7 +134,17 @@ export async function getPricingWithSources(): Promise<{
 export async function getPricingForModel(provider: string, model: string) {
   const pricing = await getPricing();
 
-  const RATE_KEYS = ["input", "output", "cached"] as const;
+  // Every rate a row can carry. A partial override inherits whichever ones it omits from
+  // the fallback row; leaving `long_context` behind would silently bill the flat rate for
+  // a model that prices long-context calls separately.
+  const RATE_KEYS = [
+    "input",
+    "output",
+    "cached",
+    "reasoning",
+    "cache_creation",
+    "long_context",
+  ] as const;
 
   /**
    * Fill rates a row omits from a more complete fallback row. A user override that only
