@@ -298,6 +298,31 @@ async function fetchAntigravityUserQuotaCached(
   return promise;
 }
 
+/**
+ * Merge quota buckets reported by a second client profile's retrieveUserQuota
+ * response into the map built from the connection's primary profile. Existing
+ * buckets win; only model ids the primary profile did not report are added.
+ *
+ * Gemini 4 Hydrogen tier ids are served by the cli identity only: the ide
+ * catalog (and its retrieveUserQuota response) advertises just
+ * `gemini-4-hydrogen-sonar`, while OmniRoute executes the four tier ids with the
+ * cli profile regardless of the connection's setting. Without this merge,
+ * Provider Limits silently omits every Hydrogen tier the account can call.
+ */
+function mergeAntigravityUserQuotaBuckets(
+  target: Map<string, JsonRecord>,
+  userQuotaData: unknown
+): void {
+  const bucketList = toRecord(userQuotaData).buckets;
+  if (!Array.isArray(bucketList)) return;
+  for (const bucketValue of bucketList) {
+    const bucket = toRecord(bucketValue);
+    const modelId = toClientAntigravityQuotaModelId(String(bucket.modelId || "").trim());
+    if (!modelId || target.has(modelId)) continue;
+    target.set(modelId, bucket);
+  }
+}
+
 function extractCodeAssistTierId(subscription: JsonRecord): string {
   const tierId = extractCodeAssistOnboardTierId(subscription);
   if (tierId === "legacy-tier") return "";
@@ -612,10 +637,17 @@ export async function getAntigravityUsage(
       );
     }
 
-    const [data, userQuotaData, weeklyQuotas] = await Promise.all([
+    const [data, userQuotaData, weeklyQuotas, cliUserQuotaData] = await Promise.all([
       fetchAntigravityAvailableModelsCached(accessToken, projectId, clientProfile, options),
       fetchAntigravityUserQuotaCached(accessToken, projectId, clientProfile, options),
       fetchAndParseAntigravityWeeklyQuotas(accessToken, projectId, clientProfile, options), // #4017
+      // The cli identity exposes quota buckets the ide identity never reports
+      // (the four Gemini 4 Hydrogen tier ids). Fetch it alongside the primary
+      // profile — best-effort: a cli failure must never break usage for the
+      // account's ide-visible models.
+      clientProfile === "cli"
+        ? Promise.resolve(null)
+        : fetchAntigravityUserQuotaCached(accessToken, projectId, "cli", options).catch(() => null),
     ]);
     const dataObj = toRecord(data);
     if (dataObj.__antigravityForbidden === true) {
@@ -632,6 +664,7 @@ export async function getAntigravityUsage(
         userQuotaEntries.set(modelId, bucket);
       }
     }
+    mergeAntigravityUserQuotaBuckets(userQuotaEntries, cliUserQuotaData);
     const quotas: Record<string, UsageQuota> = {};
 
     // Parse per-model quota info from fetchAvailableModels response.
