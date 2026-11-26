@@ -257,6 +257,10 @@ export function ensureCallLogsColumns(db: SqliteDatabase) {
       db.exec("ALTER TABLE call_logs ADD COLUMN session_tag TEXT DEFAULT NULL");
       console.log("[DB] Added call_logs.session_tag column");
     }
+    if (!columnNames.has("ttft_ms")) {
+      db.exec("ALTER TABLE call_logs ADD COLUMN ttft_ms INTEGER DEFAULT NULL");
+      console.log("[DB] Added call_logs.ttft_ms column");
+    }
 
     db.exec(
       "CREATE INDEX IF NOT EXISTS idx_call_logs_requested_model ON call_logs(requested_model)"
