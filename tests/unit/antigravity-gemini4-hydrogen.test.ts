@@ -16,6 +16,20 @@
 //   - Carbon/Argon/Neon exist in the catalog only as `*-disabled` entries.
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+// This file asserts DEFAULT pricing. Another suite in the same run persists pricing
+// overrides through the real `key_value` table, and `node --test` runs each file in its
+// own process but against the SAME default DATA_DIR — so without this, whether F4 sees
+// $1.50 or a neighbour's $42 depends on file scheduling. Isolate before importing any
+// module that can resolve a DB path.
+const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-hydrogen-main-"));
+process.env.DATA_DIR = TEST_DATA_DIR;
+test.after(() => {
+  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
+});
 
 import {
   ANTIGRAVITY_MODEL_ALIASES,
