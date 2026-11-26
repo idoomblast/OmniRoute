@@ -281,6 +281,28 @@ test("BF-1: a nested error envelope is not a catalog, at any container depth", (
     { data: [], code: 429 },
     { data: [], code: 503 },
     { models: {}, code: 500 },
+    // Error dialects the enumerated-key list did not spell. Each of these was a live wipe:
+    // an allowlist of known error keys is whack-a-mole, which is why the rule is now
+    // default-deny on unrecognised envelope keys.
+    { data: [], msg: "Too Many Requests" },
+    { data: [], statusCode: 429 },
+    { data: [], status_code: 429 },
+    { data: [], errmsg: "quota exceeded" },
+    { data: [], errorMessage: "quota exceeded" },
+    { data: [], meta: { code: 429 } },
+    { data: [], result: { code: 429 } },
+    { data: [], code: -32000 },
+    { data: [], Code: 429 },
+    { data: [], Message: "quota exceeded" },
+    { data: [], Status: "error" },
+    { data: [], whatever: "boom" },
+    { data: [], reason: { why: "quota" } },
+    // An empty container must not launder a sibling that is really an error envelope. Both keys
+    // here are catalog containers, so the per-key "persists nothing" path handles them; the
+    // shape check is what refuses it.
+    { data: {}, result: { code: 429 } },
+    { data: {}, result: { error: { code: 429 } } },
+    { models: {}, result: ["Service unavailable"] },
     // A junk array must not be rescued by an empty sibling container.
     { data: [{ message: "quota" }], result: [] },
     { data: [null], models: {} },
@@ -323,6 +345,10 @@ test("BF-1: real catalog shapes are still catalogs, including empty ones and nes
     { data: [], success: true },
     { object: "list", data: [] },
     { data: [], code: 200 },
+    { data: [], count: 0 },
+    { data: [], has_more: false },
+    { data: [], note: null, next: null },
+    { data: [], meta: {} },
     // Real models win over junk in a sibling container.
     { data: [{ message: "quota" }], models: [{ id: "real" }] },
   ];
@@ -619,3 +645,65 @@ test("BF-1: POST /sync-models refuses an empty catalog with an error signal", as
   const rows = await getSyncedAvailableModelsForConnection("watsonx", connectionId);
   assert.equal(rows.length, 2, "sync must not delete rows on an error-signal empty catalog");
 });
+
+// ---------------------------------------------------------------------------
+// Round 13 — error dialects the enumerated key list never spelled.
+//
+// These wiped the catalog in a live probe: `{"data":[],"msg":"Too Many Requests"}`,
+// `{"data":[],"statusCode":429}`, `{"data":[],"meta":{"code":429}}`,
+// `{"data":[],"code":-32000}`, `{"data":[],"Message":"quota"}`. The fix is not a longer list —
+// it is default-deny on unrecognised envelope keys. Driving the real handler is the only way to
+// show the wipe is closed.
+// ---------------------------------------------------------------------------
+
+const DIALECT_BODIES = [
+  { label: "msg", body: { data: [], msg: "Too Many Requests" } },
+  { label: "statusCode", body: { data: [], statusCode: 429 } },
+  { label: "meta.code", body: { data: [], meta: { code: 429 } } },
+  { label: "negative code", body: { data: [], code: -32000 } },
+  { label: "Message (case)", body: { data: [], Message: "quota exceeded" } },
+  { label: "junk container + sibling error", body: { data: {}, result: { code: 429 } } },
+];
+
+for (const { label, body } of DIALECT_BODIES) {
+  test(`BF-1: watsonx survives an unenumerated error dialect (${label}) on GET`, async () => {
+    await resetStorage();
+    const connectionId = await seedConnection("watsonx", `dial-${label.length}`);
+    await seedCatalog("watsonx", connectionId);
+
+    globalThis.fetch = (async () => jsonResponse(body)) as typeof fetch;
+
+    const route = await import("../../src/app/api/providers/[id]/models/route.ts");
+    await route.GET(
+      new Request(`http://localhost/api/providers/${connectionId}/models?refresh=true`),
+      { params: Promise.resolve({ id: connectionId }) }
+    );
+
+    const rows = await getSyncedAvailableModelsForConnection("watsonx", connectionId);
+    assert.equal(rows.length, 2, `catalog must survive: ${label}`);
+  });
+}
+
+test("BF-1: a shape-valid empty catalog with a benign pagination envelope still clears", async () => {
+  await resetStorage();
+  const connectionId = await seedConnection("watsonx", "dial-benign");
+  await seedCatalog("watsonx", connectionId);
+
+  globalThis.fetch = (async () =>
+    jsonResponse({ object: "list", data: [], has_more: false, count: 0 })) as typeof fetch;
+
+  const route = await import("../../src/app/api/providers/[id]/models/route.ts");
+  await route.GET(
+    new Request(`http://localhost/api/providers/${connectionId}/models?refresh=true`),
+    { params: Promise.resolve({ id: connectionId }) }
+  );
+
+  const rows = await getSyncedAvailableModelsForConnection("watsonx", connectionId);
+  assert.equal(rows.length, 0, "a genuinely empty answer must still clear the rows");
+});
+
+// A nested real catalog cannot be asserted at the ROUTE level for watsonx: its parser reads
+// `data` as an array, so `{data:{models:[...]}}` legitimately yields zero models there and the
+// row count says nothing about the classifier. The property that matters — a nested real catalog
+// is NOT mistaken for an empty or broken body — belongs on the classifier, and is covered by the
+// `{data:{data:[...]}}` / `{data:{models:[...]}}` fixtures in the positive set above.

@@ -162,19 +162,10 @@ function hasErrorEnvelopeDeep(payload: unknown): boolean {
  * alone reads it as "this account has no models" and deletes every stored row. The signal lives
  * in a SIBLING key, which no container-level test can see.
  */
-const ERROR_SIGNAL_KEYS = [
-  "message",
-  "error_code",
-  "code",
-  "status",
-  "success",
-  "reason",
-  "note",
-  "detail",
-] as const;
-
-/** Values of the above that mean "no problem" rather than reporting one. */
-const BENIGN_SIGNAL_VALUES = new Set([
+/**
+ * String values that mean "nothing went wrong" when they accompany an empty catalog.
+ */
+const BENIGN_ENVELOPE_STRINGS = new Set([
   "ok",
   "success",
   "succeeded",
@@ -183,30 +174,99 @@ const BENIGN_SIGNAL_VALUES = new Set([
   "done",
   "empty",
   "no content",
-  "200",
+  "none",
+  "null",
+  "list",
+  "collection",
+  "page",
+  "object",
 ]);
 
-function hasErrorSignal(record: Record<string, unknown>): boolean {
-  for (const key of ERROR_SIGNAL_KEYS) {
-    if (!(key in record)) continue;
-    const value = record[key];
-    if (value === null || value === undefined) continue;
-    if (typeof value === "string") {
-      const text = value.trim().toLowerCase();
-      if (!text) continue;
-      if (BENIGN_SIGNAL_VALUES.has(text)) continue;
-      return true;
+/**
+ * Keys whose boolean `false` is a pagination flag rather than a failure report.
+ *
+ * `false` is an error by DEFAULT (`{"success":false}` is the classic one), so the exceptions
+ * have to be named explicitly.
+ */
+const BENIGN_FALSE_KEYS = new Set([
+  "has_more",
+  "hasmore",
+  "has_next",
+  "hasnext",
+  "incomplete",
+  "truncated",
+]);
+
+/**
+ * Whether ONE non-container value is provably harmless next to an empty catalog.
+ *
+ * This replaced an enumerated list of error keys (`message`, `code`, `status`, ...). That list
+ * was whack-a-mole: the reviewer only had to answer `{"data":[],"msg":"Too Many Requests"}`,
+ * `{"data":[],"statusCode":429}`, `{"data":[],"meta":{"code":429}}`,
+ * `{"data":[],"code":-32000}` or `{"data":[],"Message":"quota"}` — none of which are spelled
+ * in the list — and the catalog was deleted behind a 200. Default-deny on unknown keys is the
+ * only rule that does not depend on guessing every provider's spelling.
+ */
+function isBenignEnvelopeValue(key: string, value: unknown): boolean {
+  if (value === null || value === undefined) return true;
+  if (typeof value === "string") {
+    const text = value.trim().toLowerCase();
+    if (!text) return true;
+    return BENIGN_ENVELOPE_STRINGS.has(text);
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return false;
+    // 0 and 2xx say "fine". Negative numbers and >= 400 are status/error codes.
+    return value === 0 || (value >= 200 && value < 400);
+  }
+  if (typeof value === "boolean") return value === true || BENIGN_FALSE_KEYS.has(key.toLowerCase());
+  if (Array.isArray(value)) return value.length === 0;
+  // An EMPTY object carries nothing; a non-empty one is a structured reason
+  // (`{"meta":{"code":429}}`).
+  return typeof value === "object" && Object.keys(value as Record<string, unknown>).length === 0;
+}
+
+/**
+ * Whether a container value is EMPTY but shape-valid — i.e. it would persist nothing while
+ * still being a legitimate "the account has nothing" answer.
+ *
+ * `{"data":[]}` qualifies. `{"data":{},"result":{"code":429}}` does not: presence of one empty
+ * container must not launder a sibling that is really an error report.
+ */
+function isShapeValidEmptyCatalogValue(value: unknown, key: string, depth = 0): boolean {
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value !== "object" || value === null) return false;
+  const record = value as Record<string, unknown>;
+  const entries = Object.entries(record);
+  if (entries.length === 0) return key === "models";
+  if (hasErrorEnvelopeDeep(record)) return false;
+  if (depth >= 2) return false;
+  let sawContainer = false;
+  for (const [entryKey, entryValue] of entries) {
+    if (!(CATALOG_CONTAINER_KEYS as readonly string[]).includes(entryKey)) return false;
+    sawContainer = true;
+    if (!isShapeValidEmptyCatalogValue(entryValue, entryKey, depth + 1)) return false;
+  }
+  return sawContainer;
+}
+
+/**
+ * Whether ANY depth of the value holds a model-shaped entry.
+ *
+ * `{"data":{"data":[{"id":"a"}]}}` (zai-web) and `{"data":{"models":[...]}}` (qwen-web) nest the
+ * real catalog one envelope down. A non-recursive test calls those "nothing persists" and then
+ * treats the body as an empty-or-broken answer.
+ */
+function persistsAnyModel(value: unknown, depth: number): boolean {
+  if (Array.isArray(value)) return value.some((entry) => looksLikeModelEntry(entry));
+  if (typeof value !== "object" || value === null) return false;
+  if (depth >= 2) return false;
+  const record = value as Record<string, unknown>;
+  for (const [key, entry] of Object.entries(record)) {
+    if (looksLikeModelEntry(entry)) return true;
+    if ((CATALOG_CONTAINER_KEYS as readonly string[]).includes(key)) {
+      if (persistsAnyModel(entry, depth + 1)) return true;
     }
-    if (typeof value === "number") {
-      if (value >= 400) return true;
-      continue;
-    }
-    if (typeof value === "boolean") {
-      if (value === false) return true;
-      continue;
-    }
-    // An object under one of these keys is a structured reason, not a catalog.
-    return true;
   }
   return false;
 }
@@ -239,27 +299,22 @@ export function hasCatalogCollection(payload: unknown): boolean {
   const containerKeys = CATALOG_CONTAINER_KEYS.filter((key) => key in record);
   if (containerKeys.length === 0) return false;
 
-  const wouldPersistSomething = containerKeys.some((key) => {
-    const value = record[key];
-    if (Array.isArray(value)) return value.some((entry) => looksLikeModelEntry(entry));
-    if (typeof value === "object" && value !== null) {
-      return Object.values(value as Record<string, unknown>).some((entry) =>
-        looksLikeModelEntry(entry)
-      );
-    }
-    return false;
-  });
+  const wouldPersistSomething = containerKeys.some((key) => persistsAnyModel(record[key], 0));
 
   if (!wouldPersistSomething) {
-    // A junk array is not an empty answer, so it must not be rescued by an empty sibling.
-    for (const key of containerKeys) {
-      const value = record[key];
-      if (Array.isArray(value) && value.length > 0) return false;
+    // Nothing here would persist a model, so the body is claiming "this account is empty".
+    // That claim is only authoritative when EVERY other key in the envelope is provably
+    // harmless. Default-deny: an unrecognised key might be this provider's way of reporting
+    // the failure that produced the empty list, and reading it as "no models" deletes the
+    // stored catalog behind a 200. `{"data":[],"msg":"Too Many Requests"}` is the shape that
+    // proved an enumerated error-key list was not enough.
+    for (const [key, value] of Object.entries(record)) {
+      if ((CATALOG_CONTAINER_KEYS as readonly string[]).includes(key)) {
+        if (!isShapeValidEmptyCatalogValue(value, key)) return false;
+        continue;
+      }
+      if (!isBenignEnvelopeValue(key, value)) return false;
     }
-    // An empty catalog is authoritative only when the body reports no problem. The signal sits
-    // in a sibling key (`message`/`code`/`status`/`success`/...), which a container-level test
-    // cannot see — this is what let `{"data":[],"message":"Quota exceeded","code":429}` wipe.
-    if (hasErrorSignal(record)) return false;
   }
 
   return containerKeys.some((key) => isCatalogContainerValue(record[key], key));
