@@ -268,6 +268,23 @@ test("BF-1: a nested error envelope is not a catalog, at any container depth", (
     ["Service temporarily unavailable"],
     { models: [{ error: { code: 500 } }] },
     { result: [{ message: "unauthorized" }] },
+    // An EMPTY catalog next to an error signal. The array shape is valid and empty, so a
+    // container-level test alone reads it as "this account has nothing" — the signal lives in
+    // a SIBLING key. This is the shape that wiped watsonx/oci/sap after round 11.
+    { data: [], message: "Quota exceeded, please retry later", code: 429 },
+    { data: [], success: false, message: "unauthorized" },
+    { data: [], status: "error", reason: "quota_exceeded" },
+    { models: [], success: false, error_code: "quota" },
+    { data: [], note: "service degraded" },
+    { data: [], error: { code: 429 } },
+    // A bare numeric status is enough — no message string to fall back on.
+    { data: [], code: 429 },
+    { data: [], code: 503 },
+    { models: {}, code: 500 },
+    // A junk array must not be rescued by an empty sibling container.
+    { data: [{ message: "quota" }], result: [] },
+    { data: [null], models: {} },
+    { data: ["Service temporarily unavailable"], items: [] },
   ];
   for (const body of notCatalogs) {
     assert.equal(
@@ -301,6 +318,13 @@ test("BF-1: real catalog shapes are still catalogs, including empty ones and nes
     // The other identity fields the repo's own normalizers accept.
     { data: [{ model: "gpt-x" }] },
     { data: [{ name: "Friendly Name" }] },
+    // An empty catalog with a BENIGN sibling signal is still a real empty answer.
+    { data: [], status: "ok" },
+    { data: [], success: true },
+    { object: "list", data: [] },
+    { data: [], code: 200 },
+    // Real models win over junk in a sibling container.
+    { data: [{ message: "quota" }], models: [{ id: "real" }] },
   ];
   for (const body of catalogs) {
     assert.equal(
@@ -515,4 +539,83 @@ test("BF-2: the openai-compatible endpoint loop does not break on a non-model ar
   const rows = await getSyncedAvailableModelsForConnection(provider, connectionId);
   assert.ok(probed > 0, "the test must actually reach the endpoint loop");
   assert.equal(rows.length, 2, "endpoint loop must not accept a non-model array as success");
+});
+
+// ---------------------------------------------------------------------------
+// Round 12 — an EMPTY catalog next to an error signal.
+//
+// `200 {"data":[],"message":"Quota exceeded","code":429}` has a valid, empty array under the
+// container key, so every content test on that VALUE passes. The error lives in a sibling key.
+// These drive the real handler, because that is where the wipe was reproduced.
+// ---------------------------------------------------------------------------
+
+const ERROR_SIGNAL_BODIES = [
+  {
+    label: "message+code 429",
+    body: { data: [], message: "Quota exceeded, please retry later", code: 429 },
+  },
+  { label: "success:false", body: { data: [], success: false, message: "unauthorized" } },
+  { label: "status:error", body: { data: [], status: "error", reason: "quota_exceeded" } },
+  { label: "junk array + empty sibling", body: { data: [{ message: "quota" }], result: [] } },
+];
+
+for (const provider of ["watsonx", "oci", "sap"] as const) {
+  for (const { label, body } of ERROR_SIGNAL_BODIES) {
+    test(`BF-1: ${provider} survives an empty catalog with an error signal (${label}) on GET`, async () => {
+      await resetStorage();
+      const connectionId = await seedConnection(provider, `sig-${provider}-${label.length}`);
+      await seedCatalog(provider, connectionId);
+
+      globalThis.fetch = (async () => jsonResponse(body)) as typeof fetch;
+
+      const route = await import("../../src/app/api/providers/[id]/models/route.ts");
+      await route.GET(
+        new Request(`http://localhost/api/providers/${connectionId}/models?refresh=true`),
+        { params: Promise.resolve({ id: connectionId }) }
+      );
+
+      const rows = await getSyncedAvailableModelsForConnection(provider, connectionId);
+      assert.equal(rows.length, 2, `${provider} catalog must survive: ${label}`);
+    });
+  }
+}
+
+test("BF-1: an empty catalog with no error signal still clears the rows", async () => {
+  await resetStorage();
+  const connectionId = await seedConnection("watsonx", "sig-benign");
+  await seedCatalog("watsonx", connectionId);
+
+  // Positive control: the guard must not simply refuse everything.
+  globalThis.fetch = (async () => jsonResponse({ object: "list", data: [] })) as typeof fetch;
+
+  const route = await import("../../src/app/api/providers/[id]/models/route.ts");
+  await route.GET(
+    new Request(`http://localhost/api/providers/${connectionId}/models?refresh=true`),
+    { params: Promise.resolve({ id: connectionId }) }
+  );
+
+  const rows = await getSyncedAvailableModelsForConnection("watsonx", connectionId);
+  assert.equal(rows.length, 0, "a genuinely empty answer must still persist emptiness");
+});
+
+test("BF-1: POST /sync-models refuses an empty catalog with an error signal", async () => {
+  await resetStorage();
+  const connectionId = await seedConnection("watsonx", "sig-post");
+  await seedCatalog("watsonx", connectionId);
+
+  globalThis.fetch = (async () =>
+    jsonResponse({
+      data: [],
+      message: "Quota exceeded, please retry later",
+      code: 429,
+    })) as typeof fetch;
+
+  const route = await import("../../src/app/api/providers/[id]/sync-models/route.ts");
+  await route.POST(
+    new Request(`http://localhost/api/providers/${connectionId}/sync-models`, { method: "POST" }),
+    { params: Promise.resolve({ id: connectionId }) }
+  );
+
+  const rows = await getSyncedAvailableModelsForConnection("watsonx", connectionId);
+  assert.equal(rows.length, 2, "sync must not delete rows on an error-signal empty catalog");
 });

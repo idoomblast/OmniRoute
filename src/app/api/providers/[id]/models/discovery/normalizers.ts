@@ -155,6 +155,63 @@ function hasErrorEnvelopeDeep(payload: unknown): boolean {
 }
 
 /**
+ * Keys that accompany an EMPTY catalog when the upstream is really reporting a problem.
+ *
+ * Providers answer `200 {"data":[],"message":"Quota exceeded","code":429}` — a real error with an
+ * empty array attached. The array shape is valid and empty, so a content-aware container test
+ * alone reads it as "this account has no models" and deletes every stored row. The signal lives
+ * in a SIBLING key, which no container-level test can see.
+ */
+const ERROR_SIGNAL_KEYS = [
+  "message",
+  "error_code",
+  "code",
+  "status",
+  "success",
+  "reason",
+  "note",
+  "detail",
+] as const;
+
+/** Values of the above that mean "no problem" rather than reporting one. */
+const BENIGN_SIGNAL_VALUES = new Set([
+  "ok",
+  "success",
+  "succeeded",
+  "completed",
+  "complete",
+  "done",
+  "empty",
+  "no content",
+  "200",
+]);
+
+function hasErrorSignal(record: Record<string, unknown>): boolean {
+  for (const key of ERROR_SIGNAL_KEYS) {
+    if (!(key in record)) continue;
+    const value = record[key];
+    if (value === null || value === undefined) continue;
+    if (typeof value === "string") {
+      const text = value.trim().toLowerCase();
+      if (!text) continue;
+      if (BENIGN_SIGNAL_VALUES.has(text)) continue;
+      return true;
+    }
+    if (typeof value === "number") {
+      if (value >= 400) return true;
+      continue;
+    }
+    if (typeof value === "boolean") {
+      if (value === false) return true;
+      continue;
+    }
+    // An object under one of these keys is a structured reason, not a catalog.
+    return true;
+  }
+  return false;
+}
+
+/**
  * Whether a catalog payload actually carries a models collection.
  *
  * Callers use this to SKIP an endpoint instead of answering "the account has nothing" — that
@@ -178,9 +235,34 @@ export function hasCatalogCollection(payload: unknown): boolean {
   // An error envelope at the top level is never a catalog, even when a container key is also
   // present (`{"data": [], "error": {...}}` answers an error, not an empty account).
   if (hasErrorEnvelope(record)) return false;
-  return CATALOG_CONTAINER_KEYS.some(
-    (key) => key in record && isCatalogContainerValue(record[key], key)
-  );
+
+  const containerKeys = CATALOG_CONTAINER_KEYS.filter((key) => key in record);
+  if (containerKeys.length === 0) return false;
+
+  const wouldPersistSomething = containerKeys.some((key) => {
+    const value = record[key];
+    if (Array.isArray(value)) return value.some((entry) => looksLikeModelEntry(entry));
+    if (typeof value === "object" && value !== null) {
+      return Object.values(value as Record<string, unknown>).some((entry) =>
+        looksLikeModelEntry(entry)
+      );
+    }
+    return false;
+  });
+
+  if (!wouldPersistSomething) {
+    // A junk array is not an empty answer, so it must not be rescued by an empty sibling.
+    for (const key of containerKeys) {
+      const value = record[key];
+      if (Array.isArray(value) && value.length > 0) return false;
+    }
+    // An empty catalog is authoritative only when the body reports no problem. The signal sits
+    // in a sibling key (`message`/`code`/`status`/`success`/...), which a container-level test
+    // cannot see — this is what let `{"data":[],"message":"Quota exceeded","code":429}` wipe.
+    if (hasErrorSignal(record)) return false;
+  }
+
+  return containerKeys.some((key) => isCatalogContainerValue(record[key], key));
 }
 
 /**
