@@ -1,3 +1,9 @@
+---
+title: "Gemini 4 Hydrogen reasoning tiers (Antigravity / AGY)"
+version: 3.8.49
+lastUpdated: 2026-11-26
+---
+
 # Gemini 4 Hydrogen reasoning tiers (Antigravity / AGY)
 
 Gemini 4 Hydrogen on the Cloud Code surface is tiered **by model id**, exactly like
