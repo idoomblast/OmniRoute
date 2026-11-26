@@ -478,15 +478,22 @@ export async function GET(
       extraPayload: Record<string, unknown> = {},
       sourcePayload?: unknown
     ) => {
-      // Structural guard: a provider that answers 200 with an error envelope (or any body that
-      // is not a catalog) must never clear the stored catalog. The check lives HERE, not at each
-      // call site, because six sites had already been written without it and each one wiped a
-      // healthy catalog behind `200 {ok:true}`. Sites parsing a raw response pass it as
-      // `sourcePayload`; sites whose models come from an already-validated helper pass nothing.
-      const payloadIsNotCatalog =
+      // SAFE BY DEFAULT. An empty list is only allowed to persist when the caller has PROVEN
+      // upstream answered with a catalog — pass the raw body as `sourcePayload`. Everything else
+      // — no payload supplied, an error envelope, or a body with no known catalog container —
+      // refuses the write and falls back to the stored catalog.
+      //
+      // The polarity matters: an earlier version only refused when a payload was supplied AND it
+      // looked like an error, which made the guard opt-in. 15 of 22 call sites never supplied one,
+      // so `models.length === 0` still wiped the catalog there. A call site can now only lose that
+      // protection by explicitly passing `authoritativeEmpty: true`, which is a deliberate,
+      // greppable act rather than an omission.
+      const authoritativeEmpty = extraPayload.authoritativeEmpty === true;
+      const payloadProvesCatalog =
         sourcePayload !== undefined &&
-        (hasErrorEnvelope(sourcePayload) || !hasCatalogCollection(sourcePayload));
-      if (models.length === 0 && payloadIsNotCatalog) {
+        !hasErrorEnvelope(sourcePayload) &&
+        hasCatalogCollection(sourcePayload);
+      if (models.length === 0 && !authoritativeEmpty && !payloadProvesCatalog) {
         const fallback = buildDiscoveryFallbackResponse({
           cacheWarning: "Upstream returned no catalog — using cached catalog",
           localWarning: "Upstream returned no catalog — using local catalog",
@@ -642,7 +649,9 @@ export async function GET(
           graphqlEndpoint,
         });
         const models = discovered.map((m) => ({ id: m.id, name: m.name }));
-        return buildApiDiscoveryResponse(models);
+        // `discoverPromptQlModels` throws on `errors[]` and on a non-ok status, so a resolved
+        // empty list is a real answer: the account has nothing.
+        return buildApiDiscoveryResponse(models, undefined, { authoritativeEmpty: true });
       } catch (error) {
         console.log("Error fetching models from promptql", {
           error: error instanceof Error ? error.message : String(error),
@@ -701,7 +710,11 @@ export async function GET(
             }),
         });
         // Pass through plan-lock warnings (e.g. Fable 5 requires Business/Enterprise).
-        return buildApiDiscoveryResponse(discovery.models, discovery.warning);
+        // The helper only resolves after a successful getAvailableModels, so an empty list is
+        // authoritative; a failed call throws to the catch above.
+        return buildApiDiscoveryResponse(discovery.models, discovery.warning, {
+          authoritativeEmpty: true,
+        });
       } catch (error) {
         console.log("Error fetching models from notion-web", {
           error: error instanceof Error ? error.message : String(error),
@@ -773,7 +786,15 @@ export async function GET(
             ? { outputTokenLimit: model.outputTokenLimit }
             : {}),
         }));
-        return buildApiDiscoveryResponse(models, discovery.warnings[0]);
+        // Bedrock's own discovery result carries the raw FoundationModels body; passing it
+        // means an answered-but-empty catalog can still be persisted, while an error envelope
+        // behind a 200 cannot.
+        return buildApiDiscoveryResponse(
+          models,
+          discovery.warnings[0],
+          {},
+          discovery.foundationModelsResponse
+        );
       } catch (error) {
         const status = isBedrockNativeApiError(error)
           ? error.status
@@ -932,6 +953,9 @@ export async function GET(
         }
       }
 
+      // Reaching here means every endpoint either errored or answered with a catalog — the
+      // loop above skips (rather than accepts) a 200 without a collection. So an empty result
+      // from a completed loop is an authoritative answer, not a failed sweep.
       // If all endpoints failed (but not because of auth), fallback to local catalog
       if (!models) {
         const fallback = buildDiscoveryFallbackResponse({
@@ -963,7 +987,7 @@ export async function GET(
           warning: "API unavailable — using local catalog",
         });
       }
-      return buildApiDiscoveryResponse(models);
+      return buildApiDiscoveryResponse(models, undefined, { authoritativeEmpty: true });
     }
 
     if (provider === "datarobot") {
@@ -1447,7 +1471,9 @@ export async function GET(
 
       try {
         const models = await fetchCursorAgentModels();
-        return buildApiDiscoveryResponse(models);
+        // Throws on a missing binary or on "Authentication required"; a resolved empty list
+        // means the CLI really listed nothing.
+        return buildApiDiscoveryResponse(models, undefined, { authoritativeEmpty: true });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.log("[models] cursor-agent fetch failed:", message);
@@ -1642,8 +1668,9 @@ export async function GET(
 
       const data = await response.json();
       const models = data.data || data.models || [];
-      // A 200 without a catalog collection is a malformed answer, not an empty catalog.
-      // Persisting it would wipe the stored rows and report "no changes".
+      // Pass the raw body so the helper can tell "upstream answered with an empty catalog"
+      // from "upstream answered with something that is not a catalog". The helper owns the
+      // decision; a second inline copy of the rule is how the sites drifted apart before.
       if (models.length === 0 && (hasErrorEnvelope(data) || !hasCatalogCollection(data))) {
         console.warn(
           `[models] ${provider}: 200 without a catalog collection — not treating it as empty`
@@ -1653,7 +1680,7 @@ export async function GET(
         return NextResponse.json({ error: "Provider returned no model catalog" }, { status: 502 });
       }
 
-      return buildApiDiscoveryResponse(models);
+      return buildApiDiscoveryResponse(models, undefined, {}, data);
     }
 
     if (provider === "antigravity" || provider === "agy") {
@@ -1735,6 +1762,10 @@ export async function GET(
       const discoveryMeta: Record<string, unknown> = {
         // Tier rows here may be last-known-good rather than freshly discovered.
         ...(discovery.degraded ? { discoveryDegraded: true, importable: false } : {}),
+        // `discovery.models` comes from the sweep, which reports whether upstream actually
+        // answered (`ok`). An answered-but-empty sweep is authoritative and must clear; a
+        // sweep that never answered is not a catalog and must not.
+        ...(!discovery.degraded && discovery.ok === true ? { authoritativeEmpty: true } : {}),
       };
       return buildApiDiscoveryResponse(persisted, warning, discoveryMeta);
     }
@@ -1771,7 +1802,9 @@ export async function GET(
       });
 
       if (discovery.source === "api") {
-        return buildApiDiscoveryResponse(discovery.models);
+        // `source === "api"` is exactly the helper telling us upstream answered, so an empty
+        // catalog here is authoritative.
+        return buildApiDiscoveryResponse(discovery.models, undefined, { authoritativeEmpty: true });
       }
 
       // Live discovery unavailable — preserve cached/static catalog behavior.
@@ -2100,8 +2133,9 @@ export async function GET(
 
       const data = await response.json();
       const models = data.data || data.models || [];
-      // A 200 without a catalog collection is a malformed answer, not an empty catalog.
-      // Persisting it would wipe the stored rows and report "no changes".
+      // Pass the raw body so the helper can tell "upstream answered with an empty catalog"
+      // from "upstream answered with something that is not a catalog". The helper owns the
+      // decision; a second inline copy of the rule is how the sites drifted apart before.
       if (models.length === 0 && (hasErrorEnvelope(data) || !hasCatalogCollection(data))) {
         console.warn(
           `[models] ${provider}: 200 without a catalog collection — not treating it as empty`
@@ -2111,7 +2145,7 @@ export async function GET(
         return NextResponse.json({ error: "Provider returned no model catalog" }, { status: 502 });
       }
 
-      return buildApiDiscoveryResponse(models);
+      return buildApiDiscoveryResponse(models, undefined, {}, data);
     }
 
     const config =
@@ -2410,7 +2444,9 @@ export async function GET(
       );
     }
 
-    return buildApiDiscoveryResponse(allModels);
+    // Every page in the loop above was validated before its models were concatenated, so a
+    // completed pagination is an authoritative answer even when the total is zero.
+    return buildApiDiscoveryResponse(allModels, undefined, { authoritativeEmpty: true });
   } catch (error) {
     if (error instanceof SafeOutboundFetchError && error.code === "URL_GUARD_BLOCKED") {
       return NextResponse.json({ error: sanitizeErrorMessage(error.message) }, { status: 400 });

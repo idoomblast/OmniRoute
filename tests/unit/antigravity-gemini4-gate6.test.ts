@@ -219,3 +219,77 @@ test("BF-4: a partial override on a provider whose alias owns the prices keeps e
   assert.equal(row.cache_creation, 0.125, "cache_creation inherited");
   assert.deepEqual(row.long_context, FULL.long_context, "long_context tier inherited");
 });
+
+// ---------------------------------------------------------------------------
+// BF-1 (round 8) — the guard must be SAFE BY DEFAULT, not opt-in.
+//
+// The round-7 fix threaded a `sourcePayload` through seven sites and left fifteen without one.
+// Because the guard only refused when a payload was supplied AND looked like an error, those
+// fifteen still wiped the catalog on `models.length === 0`. A guard whose protection depends on
+// each call site opting in is not a guard: it is a checklist, and the checklist was already
+// wrong once.
+//
+// This test reads the source and fails if a call site can reach the helper with an empty list
+// and no stated reason — so adding a site now requires either passing the raw body or writing
+// `authoritativeEmpty: true` with a justification.
+// ---------------------------------------------------------------------------
+
+test("BF-1 structural: every call site either proves a catalog or declares itself authoritative", async () => {
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const file = path.join(process.cwd(), "src/app/api/providers/[id]/models/route.ts");
+  const lines = fs.readFileSync(file, "utf8").split("\n");
+
+  function callText(start: number): string {
+    let depth = 0;
+    const buf: string[] = [];
+    for (let j = start; j < lines.length; j++) {
+      buf.push(lines[j]);
+      depth += (lines[j].match(/\(/g) || []).length - (lines[j].match(/\)/g) || []).length;
+      if (depth <= 0) break;
+    }
+    return buf.join("\n");
+  }
+
+  const silent: string[] = [];
+  let sites = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].includes("buildApiDiscoveryResponse(")) continue;
+    if (lines[i].includes("const buildApiDiscoveryResponse")) continue;
+    sites++;
+
+    const text = callText(i);
+    // A stated reason: the raw body is passed as proof, or the caller declares the empty list
+    // authoritative (directly, or via a meta object it builds just above).
+    // The proof is the LAST argument: the raw body, under any name that reads like one.
+    const args = text.slice(text.indexOf("(") + 1, text.lastIndexOf(")"));
+    const lastArg = args.split(",").pop()?.trim() || "";
+    // Exact match on the final segment of a property path (`discovery.foundationModelsResponse`
+    // counts, `rawMetadata` does not — a loose suffix match would let any variable ending in
+    // "data" masquerade as proof).
+    const lastSegment = lastArg.split(".").pop() || "";
+    const namesProof =
+      lastSegment === "data" ||
+      lastSegment === "modelsBody" ||
+      lastSegment === "foundationModelsResponse" ||
+      /[Pp]ayload$/.test(lastSegment);
+    const declares =
+      text.includes("authoritativeEmpty") ||
+      /return buildApiDiscoveryResponse\(persisted, warning, discoveryMeta\)/.test(text);
+
+    // A branch that cannot reach the helper with an empty list needs no proof.
+    const pre = lines.slice(Math.max(0, i - 6), i).join("\n");
+    const lengthGated = /\.length\s*>\s*0\s*\)/.test(pre);
+
+    if (!namesProof && !declares && !lengthGated) {
+      silent.push(`line ${i + 1}: ${lines[i].trim()}`);
+    }
+  }
+
+  assert.ok(sites >= 20, `expected the known set of call sites, found ${sites}`);
+  assert.deepEqual(
+    silent,
+    [],
+    `call sites with no stated reason for an empty result:\n${silent.join("\n")}`
+  );
+});
