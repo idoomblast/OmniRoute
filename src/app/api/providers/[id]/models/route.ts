@@ -113,6 +113,7 @@ import {
   normalizeAzureModelsResponse,
 } from "./discovery/normalizers";
 import { isNamedOpenAIStyleProvider } from "./discovery/providerSets";
+import { isDisabledAntigravityModelId } from "@omniroute/open-sse/config/antigravityThinkingLevels.ts";
 import { buildStaleEncryptionKeyResponse } from "./staleEncryptionGuard";
 import {
   type ProviderModelsConfigEntry,
@@ -226,6 +227,11 @@ export async function GET(
     const excludeHidden = searchParams.get("excludeHidden") === "true";
     const excludeCustom = searchParams.get("excludeCustom") === "true";
     const refresh = searchParams.get("refresh") === "true";
+    // `persist=false` makes this route a pure probe: it runs the live sweep and returns
+    // what upstream said without touching the synced rows. model-sync uses it because
+    // the refresh route would otherwise write the catalog (including a degraded merge)
+    // before POST has decided whether the result is importable at all.
+    const persistDiscovery = searchParams.get("persist") !== "false";
 
     const connection = await getCachedProviderConnectionById(id);
     const connectionProvider =
@@ -333,8 +339,15 @@ export async function GET(
     }> | null = null;
     try {
       const allSynced = usesCuratedModelsOnly ? [] : await getSyncedAvailableModels(provider);
-      if (Array.isArray(allSynced) && allSynced.length > 0) {
-        providerSyncedModels = allSynced.map((m) => ({
+      // A row that a previous sync wrote before the discovery filter existed must not
+      // survive here either: this union spans every connection, so it is the one place a
+      // stale `*-disabled` row could still reach a management response.
+      const callableSynced =
+        provider === "antigravity" || provider === "agy"
+          ? allSynced.filter((m) => !isDisabledAntigravityModelId(m.id))
+          : allSynced;
+      if (Array.isArray(callableSynced) && callableSynced.length > 0) {
+        providerSyncedModels = callableSynced.map((m) => ({
           id: m.id,
           name: m.name || m.id,
           ...(m.apiFormat ? { apiFormat: m.apiFormat } : {}),
@@ -458,6 +471,18 @@ export async function GET(
       warning?: string,
       extraPayload: Record<string, unknown> = {}
     ) => {
+      if (!persistDiscovery) {
+        // Probe mode: report what upstream said, write nothing. The caller (model-sync)
+        // persists only after it has accepted the result.
+        return buildResponse({
+          provider,
+          connectionId,
+          models: mergeSpecialtyCatalogIntoLiveModels(models, provider),
+          source: "api",
+          ...(warning ? { warning } : {}),
+          ...extraPayload,
+        });
+      }
       const discoveredModels = await persistDiscoveredModels(provider, connectionId, models);
       if (discoveredModels.length > 0) {
         // #6976 — merge curated embedding/rerank specialty entries (e.g.
@@ -518,6 +543,7 @@ export async function GET(
           models: freshLocal,
           source: "local_catalog",
           warning: "No remote models discovered — using local catalog",
+          ...extraPayload,
         });
       }
 
@@ -526,6 +552,7 @@ export async function GET(
         connectionId,
         models: [],
         source: "api",
+        ...extraPayload,
       });
     };
 
@@ -1562,17 +1589,26 @@ export async function GET(
       const staticModels = getStaticModelsForProvider(provider) || [];
 
       if (!accessToken) {
+        // Cached rows without a token are not a discovery result: sync must not import
+        // them, or a connection that merely lost its token would rewrite the managed
+        // model set and the persisted MITM aliases from a stale snapshot.
         const fallback = buildDiscoveryFallbackResponse({
           cacheWarning: "OAuth token unavailable — using cached catalog",
           localWarning: "OAuth token unavailable — using local catalog",
         });
-        if (fallback) return fallback;
+        if (fallback) {
+          return buildResponse({
+            ...(await fallback.json()),
+            importable: false,
+          });
+        }
         return buildResponse({
           provider,
           connectionId,
           models: staticModels,
           source: "local_catalog",
           warning: "OAuth token unavailable — using local catalog",
+          importable: false,
         });
       }
 
@@ -1595,6 +1631,7 @@ export async function GET(
           return buildResponse({
             ...(await fallback.json()),
             discoveryDegraded: true,
+            importable: false,
           });
         }
 
@@ -1604,44 +1641,25 @@ export async function GET(
           models: staticModels,
           source: "local_catalog",
           discoveryDegraded: true,
+          importable: false,
           ...(usesCuratedModelsOnly ? {} : { warning: "API unavailable — using local catalog" }),
         });
       }
-      if (discovery.models.length > 0) {
-        // The cli supplement failed: the primary catalog is complete for non-tier
-        // models, but we cannot see the tier ids this sweep. Merge the connection's
-        // last-known-good tiers back in so a cli outage does not delete four working
-        // models; the primary sweep stays authoritative for everything else.
-        const persisted = discovery.degraded
-          ? mergeLastKnownTiers(discovery.models, cachedDiscoveryModels)
-          : discovery.models;
-        const warning = discovery.degraded ? DEGRADED_TIER_WARNING : undefined;
-        const discoveredModels = await persistDiscoveredModels(provider, connectionId, persisted);
-        if (discoveredModels.length > 0) {
-          const mergedModels = mergeSpecialtyCatalogIntoLiveModels(persisted, provider);
-          return buildResponse({
-            provider,
-            connectionId,
-            models: mergedModels,
-            source: "api",
-            ...(warning ? { warning } : {}),
-            // Tier rows here may be last-known-good rather than freshly discovered.
-            ...(discovery.degraded ? { discoveryDegraded: true } : {}),
-          });
-        }
-        // Empty after persistence: fall through to the shared cached/local path below.
-      }
 
-      const fallback = buildDiscoveryFallbackResponse();
-      if (fallback) return fallback;
-
-      return buildResponse({
-        provider,
-        connectionId,
-        models: staticModels,
-        source: "local_catalog",
-        ...(usesCuratedModelsOnly ? {} : { warning: "API unavailable — using local catalog" }),
-      });
+      // The sweep answered, so its result — including an EMPTY one — is authoritative and
+      // must reach persistence. Reusing stale rows here would keep publishing models the
+      // account no longer has, which is exactly the entitlement change a refresh exists to
+      // record. The cli supplement failing is the only case that borrows last-known state,
+      // and only for the tier rows it could not see.
+      const persisted = discovery.degraded
+        ? mergeLastKnownTiers(discovery.models, cachedDiscoveryModels)
+        : discovery.models;
+      const warning = discovery.degraded ? DEGRADED_TIER_WARNING : undefined;
+      const discoveryMeta: Record<string, unknown> = {
+        // Tier rows here may be last-known-good rather than freshly discovered.
+        ...(discovery.degraded ? { discoveryDegraded: true, importable: false } : {}),
+      };
+      return buildApiDiscoveryResponse(persisted, warning, discoveryMeta);
     }
 
     if (provider === "github") {

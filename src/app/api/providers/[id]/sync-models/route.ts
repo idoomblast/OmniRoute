@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCachedProviderConnectionById } from "@/lib/localDb";
 import { getSyncedAvailableModelsForConnection } from "@/lib/db/models";
+import { persistDiscoveredModels } from "@/lib/providerModels/modelDiscovery";
 import { selectModelsForImport } from "@/shared/utils/freeModels";
 import {
   importManagedModels,
@@ -325,9 +326,12 @@ export async function selfFetchWithRetry(
 
 async function fetchProviderModelsForSync(request: Request, connectionId: string) {
   const safeOrigin = getModelSyncInternalBaseUrl();
+  // `persist=false` keeps the refresh route read-only until POST accepts the result.
+  // Without it the route writes the catalog — including a degraded last-known-good merge
+  // — before POST can reject a degraded sweep, so a refused sync had already mutated rows.
   const modelsPath =
     `/api/providers/${encodeURIComponent(connectionId)}/models` +
-    "?refresh=true&excludeCustom=true";
+    "?refresh=true&excludeCustom=true&persist=false";
   const headers = {
     cookie: request.headers.get("cookie") || "",
     ...buildModelSyncInternalHeaders(),
@@ -455,8 +459,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     // A discovery-degraded response carries cached rows, not a fresh import source.
     // Importing it would regenerate managed models and overwrite the persisted MITM
     // aliases with whatever the cached snapshot happened to contain, so bail out before
-    // any model or alias write.
-    if (modelsData.discoveryDegraded === true) {
+    // any model or alias write. `importable: false` covers the same hazard when the
+    // cache was reused for a different reason (no token at all).
+    if (modelsData.discoveryDegraded === true || modelsData.importable === false) {
       const responseError =
         modelWarning || "Remote model discovery failed; refusing to sync cached models";
       await saveCallLog({
@@ -522,6 +527,20 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     }
 
     const allFetchedModels = modelsData.models || [];
+    // The refresh route ran in probe mode (`persist=false`), so nothing has been written
+    // yet. Persisting here — after the degraded and importable guards above have passed —
+    // is what makes the sync's own write the first and only one. A body that carries no
+    // models array says nothing about the catalog, so it must not clear what is stored.
+    if (Array.isArray(modelsData.models)) {
+      try {
+        await persistDiscoveredModels(logProvider, id, allFetchedModels);
+      } catch (persistError) {
+        console.warn(
+          `[ModelSync] Failed to persist discovered models for ${logProvider}:`,
+          persistError instanceof Error ? persistError.message : persistError
+        );
+      }
+    }
     const importFreeOnly = Boolean(
       (connection.providerSpecificData as Record<string, unknown> | undefined)?.importFreeModelsOnly
     );

@@ -136,9 +136,6 @@ export async function getPricingForModel(provider: string, model: string) {
 
   const RATE_KEYS = ["input", "output", "cached"] as const;
 
-  const hasAllRates = (row: JsonRecord): boolean =>
-    RATE_KEYS.every((key) => typeof row[key] === "number" && Number.isFinite(row[key] as number));
-
   /**
    * Fill rates a row omits from a more complete fallback row. A user override that only
    * sets `input` is a legitimate partial override; leaving `output` undefined makes the
@@ -229,21 +226,6 @@ export async function getPricingForModel(provider: string, model: string) {
   );
   const canonicalModel = isAntigravityNamespace ? resolveAntigravityModelId(mLower) : mLower;
 
-  const lookupModel = (table: PricingModels): JsonRecord | undefined => {
-    // An explicit row for the model the caller asked for wins over the canonical
-    // default it routes to: a user who pins `gemini-4-hydrogen` to $42 means that row,
-    // not the High tier it resolves onto. Check the exact name first, then the alias
-    // target, then the dotted-form normalisation.
-    let hit = findKeyInsensitive<JsonRecord>(table, mLower);
-    if (!hit && canonicalModel !== mLower) {
-      hit = findKeyInsensitive<JsonRecord>(table, canonicalModel);
-    }
-    if (!hit) {
-      hit = findKeyInsensitive(table, mLower.replace(/\./g, "-"));
-    }
-    return hit;
-  };
-
   const searchOrder = providerPricing
     ? [
         providerPricing,
@@ -256,60 +238,39 @@ export async function getPricingForModel(provider: string, model: string) {
         .map((ns) => findKeyInsensitive<PricingModels>(pricing, ns))
         .filter((t): t is PricingModels => Boolean(t));
 
-  const tried = new Set<PricingModels>();
-
-  /**
-   * Look up the model name the CALLER asked for, ignoring alias resolution.
-   *
-   * An explicit row for `gemini-4-hydrogen` is a user's deliberate override of that
-   * model; it must beat the canonical tier default it routes to, even when the override
-   * only sets some rates (those are filled in afterwards from the fallback row).
-   */
-  const findExactRow = (): JsonRecord | null => {
-    for (const table of searchOrder) {
-      if (tried.has(table)) continue;
-      tried.add(table);
-      const hit =
-        findKeyInsensitive<JsonRecord>(table, mLower) ??
-        findKeyInsensitive<JsonRecord>(table, mLower.replace(/\./g, "-"));
-      if (hit) return hit;
+  // Walk the tables in precedence order and merge every distinct row we find. The FIRST
+  // row that sets a rate is the one that counts; later rows only fill the rates it left
+  // out. Two cases this pins down:
+  //   - a partial override for the requested name keeps its own rates and inherits the
+  //     rest from the canonical row, instead of billing the omitted ones at $0;
+  //   - a provider-local partial row keeps its rates even when the same model also
+  //     exists, complete, in the shared namespace.
+  // Inside one table the requested name is consulted before its alias target, so a
+  // deliberate override of a display alias still beats the tier default it routes to.
+  const rowCandidates = (table: PricingModels): JsonRecord[] => {
+    const seenRows = new Set<JsonRecord>();
+    const out: JsonRecord[] = [];
+    for (const name of [mLower, canonicalModel, mLower.replace(/\./g, "-")]) {
+      if (!name) continue;
+      const hit = findKeyInsensitive<JsonRecord>(table, name);
+      if (!hit || seenRows.has(hit)) continue;
+      seenRows.add(hit);
+      out.push(hit);
     }
-    return null;
+    return out;
   };
 
-  const exactRow = findExactRow();
-  if (exactRow) {
-    let merged = exactRow;
-    for (const table of searchOrder) {
-      const fallback = lookupModel(table);
-      if (fallback) merged = mergeMissingRates(merged, fallback);
-    }
-    return merged;
-  }
-
-  tried.clear();
-  let primaryHit: JsonRecord | null = null;
+  let merged: JsonRecord | null = null;
+  const seenTables = new Set<PricingModels>();
   for (const table of searchOrder) {
-    if (tried.has(table)) continue;
-    tried.add(table);
-    const hit = lookupModel(table);
-    if (!hit) continue;
-    if (!primaryHit) primaryHit = hit;
-    // A canonical row that carries only some rates must not zero the ones it omits.
-    // Keep looking for a more complete row and merge, rather than returning a partial
-    // row that makes output tokens free.
-    if (hasAllRates(hit)) return hit;
-  }
-
-  if (primaryHit) {
-    for (const table of searchOrder) {
-      const fallback = lookupModel(table);
-      if (fallback) primaryHit = mergeMissingRates(primaryHit, fallback);
+    if (seenTables.has(table)) continue;
+    seenTables.add(table);
+    for (const row of rowCandidates(table)) {
+      merged = merged ? mergeMissingRates(merged, row) : row;
     }
-    return primaryHit;
   }
 
-  return null;
+  return merged;
 }
 
 export async function updatePricing(pricingData: PricingByProvider) {

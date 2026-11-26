@@ -48,14 +48,15 @@ export type AntigravityDiscoveryResult = {
 
 /**
  * Whether a discovery payload actually carries a models collection. `models` may be an
- * array (or an id→model map); anything else means the body is not a catalog answer, so
- * its emptiness must not be read as authoritative.
+ * array or an id→model map, and BOTH are valid even when empty — an account with nothing
+ * entitled is a real answer that the caller must persist, or the previous catalog would
+ * outlive its entitlement. Only a missing or non-object field means the body is not a
+ * catalog answer, and then its emptiness must not be read as authoritative.
  */
 function hasModelsCollection(payload: unknown): boolean {
   const models = asRecord(payload).models;
   if (Array.isArray(models)) return true;
-  const map = asRecord(models);
-  return Object.keys(map).length > 0;
+  return typeof models === "object" && models !== null;
 }
 
 type AntigravityDiscoveryModel = {
