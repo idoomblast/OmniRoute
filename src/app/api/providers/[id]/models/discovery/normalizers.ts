@@ -81,7 +81,7 @@ const ERROR_ENVELOPE_KEYS = ["error", "errors", "fault", "detail"] as const;
 function looksLikeModelEntry(value: unknown): boolean {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const entry = value as Record<string, unknown>;
-  for (const field of ["id", "name", "model"] as const) {
+  for (const field of ["id", "name", "model", "displayName", "display_name"] as const) {
     const raw = entry[field];
     if (typeof raw === "string" && raw.trim().length > 0) return true;
   }
@@ -340,8 +340,12 @@ export function hasCatalogCollection(payload: unknown): boolean {
  * carrying — the exact failure the catalog guards exist to prevent, arrived at from the inside.
  * Every empty-decision site must ask THIS question after parsing, not just the body-level one.
  */
-export function catalogParseDiverges(payload: unknown, parsedCount: number): boolean {
-  return parsedCount === 0 && persistsAnyModel(payload, 0);
+export function catalogParseDiverges(payload: unknown, parsedCount: number | undefined): boolean {
+  // A provider parser can return a NON-ARRAY (`data.data` is whatever upstream sent), so a raw
+  // `.length` read is `undefined` and silently compares false. Treat "no usable count" the same
+  // as zero: if the body carries a model the parse did not produce, the parse is not evidence.
+  const count = typeof parsedCount === "number" && Number.isFinite(parsedCount) ? parsedCount : 0;
+  return count === 0 && persistsAnyModel(payload, 0);
 }
 
 /**
@@ -366,19 +370,6 @@ export function hasErrorEnvelope(payload: unknown): boolean {
     if (Array.isArray(value)) return value.length > 0;
     return typeof value === "object" && Object.keys(value as Record<string, unknown>).length > 0;
   });
-}
-
-/**
- * Whether a discovery payload actually carries a models collection. `models` may be an
- * array or an id→model map, and BOTH are valid even when empty — an account with nothing
- * entitled is a real answer that the caller must persist, or the previous catalog would
- * outlive its entitlement. Only a missing or non-object field means the body is not a
- * catalog answer, and then its emptiness must not be read as authoritative.
- */
-function hasModelsCollection(payload: unknown): boolean {
-  const models = asRecord(payload).models;
-  if (Array.isArray(models)) return true;
-  return typeof models === "object" && models !== null;
 }
 
 type AntigravityDiscoveryModel = {
@@ -606,7 +597,14 @@ async function discoverAntigravityModelsForKey(
       // collection. A 200 with an unexpected shape (an error envelope, a redirect page)
       // carries no information about the catalog, and treating it as "the account has
       // nothing" would suppress a healthy later endpoint and publish a partial catalog.
-      if (!hasModelsCollection(payload)) {
+      //
+      // The test is the SAME content-aware classifier the generic path uses, not a shape
+      // check. `hasModelsCollection` only asked whether `models` was an object, so
+      // `{"models":{"error":{"code":429}}}` passed it, `normalizeAntigravityModelsResponse`
+      // turned the map KEY `error` into a model named "error", the sweep answered `ok:true`,
+      // and that single bogus row replaced the whole catalog. `{"models":[],"error":true}`
+      // passed it too and deleted every stored row as an authoritative empty.
+      if (!hasCatalogCollection(payload)) {
         console.warn(
           `[models] ${provider} discovery at ${discoveryUrl} returned no models collection — skipping`
         );

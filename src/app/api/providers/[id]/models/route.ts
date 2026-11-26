@@ -2481,11 +2481,20 @@ export async function GET(
       }
       const pageModels = config.parseResponse(data);
       // The loop guard above only proves the BODY carries a catalog. If this provider's parser
-      // reads a different key than the one carrying the models, `pageModels` is empty while the
+      // reads a different key than the one carrying the models, the parse is empty while the
       // body is not — and the `authoritativeEmpty` flag below would then delete every stored row
       // on a completed pagination. Divergence is not an empty account.
-      if (catalogParseDiverges(data, pageModels.length)) parserDiverged = true;
-      allModels = allModels.concat(pageModels);
+      //
+      // The count must be the PERSISTABLE one, not `pageModels.length`. These parsers return
+      // `data.data || data.models || []` unchecked, so the value can be a non-array (`.length`
+      // is `undefined`) or a non-empty array of junk (`[{error:{...}}]`, `[{}]`) whose `.length`
+      // is 1. Either way a raw length test reports "no divergence" and the empty write goes
+      // through. `normalizeDiscoveredModels` is the same normalizer the write path uses.
+      const pagePersistableCount = Array.isArray(pageModels)
+        ? normalizeDiscoveredModels(pageModels).length
+        : 0;
+      if (catalogParseDiverges(data, pagePersistableCount)) parserDiverged = true;
+      allModels = allModels.concat(Array.isArray(pageModels) ? pageModels : []);
 
       const nextPageToken = data.nextPageToken;
       if (!nextPageToken) break;

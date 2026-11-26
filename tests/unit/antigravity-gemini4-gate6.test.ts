@@ -917,3 +917,212 @@ test("BF-1: an explicit `error: false` next to an empty catalog is a real empty 
     assert.equal(hasCatalogCollection(body), false, JSON.stringify(body));
   }
 });
+
+// ---------------------------------------------------------------------------
+// Round 15, BF-1 — the paginated/config-driven path must use the PERSISTABLE count.
+//
+// `config.parseResponse` for ~30 providers returns `data.data || data.models || []` unchecked, so
+// the value can be a NON-ARRAY (`{data:{models:[...]}}`) or a NON-EMPTY ARRAY OF JUNK
+// (`{data:[{}]}`). Round 14 fed `pageModels.length` to the divergence test: `undefined` for the
+// first, `1` for the second, so divergence never fired, `authoritativeEmpty` stayed true, and the
+// empty write deleted the catalog — on GET and on POST /sync-models.
+// ---------------------------------------------------------------------------
+
+const CONFIG_PATH_PROVIDER = "groq";
+
+for (const [label, body] of [
+  ["non-array under data", { data: { models: [{ id: "carried-model" }] } }],
+  ["nested data under data", { data: { data: [{ id: "carried-model" }] } }],
+  ["junk array plus a carried model", { data: [{}], models: [{ id: "carried-model" }] }],
+] as const) {
+  test(`BF-1: ${CONFIG_PATH_PROVIDER} keeps its rows on GET — ${label}`, async () => {
+    await resetStorage();
+    const connectionId = await seedConnection(
+      CONFIG_PATH_PROVIDER,
+      `bf1-get-${label.replace(/\W+/g, "-")}`
+    );
+    await seedCatalog(CONFIG_PATH_PROVIDER, connectionId);
+
+    globalThis.fetch = (async () => jsonResponse(body)) as typeof fetch;
+
+    const route = await import("../../src/app/api/providers/[id]/models/route.ts");
+    const res = await route.GET(
+      new Request(`http://localhost/api/providers/${connectionId}/models?refresh=true`),
+      { params: Promise.resolve({ id: connectionId }) }
+    );
+    const out = (await res.json()) as { models?: unknown[] };
+
+    const rows = await getSyncedAvailableModelsForConnection(CONFIG_PATH_PROVIDER, connectionId);
+    assert.equal(rows.length, 2, `catalog must survive: ${label}`);
+    assert.notEqual(out.models?.length, 0, "must not answer an empty catalog");
+  });
+
+  test(`BF-1: ${CONFIG_PATH_PROVIDER} keeps its rows on POST — ${label}`, async () => {
+    await resetStorage();
+    const connectionId = await seedConnection(
+      CONFIG_PATH_PROVIDER,
+      `bf1-post-${label.replace(/\W+/g, "-")}`
+    );
+    await seedCatalog(CONFIG_PATH_PROVIDER, connectionId);
+
+    // `/sync-models` re-reads the probe over loopback, so the mock must serve the REAL models
+    // handler for that call and only fake the upstream.
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/providers/") && url.includes("/models?")) {
+        const parsed = new URL(url);
+        return providersRoute.GET(
+          new Request(`http://localhost${parsed.pathname}${parsed.search}`),
+          { params: Promise.resolve({ id: parsed.pathname.split("/")[3] }) }
+        );
+      }
+      if (url.includes("__readiness")) return new Response(null, { status: 404 });
+      return jsonResponse(body);
+    }) as typeof fetch;
+
+    const route = await import("../../src/app/api/providers/[id]/sync-models/route.ts");
+    await route.POST(
+      new Request(`http://localhost/api/providers/${connectionId}/sync-models`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      }),
+      { params: Promise.resolve({ id: connectionId }) }
+    );
+
+    const rows = await getSyncedAvailableModelsForConnection(CONFIG_PATH_PROVIDER, connectionId);
+    assert.equal(rows.length, 2, `sync must not persist a parser artefact: ${label}`);
+  });
+}
+
+test("BF-1: a non-numeric parse count fails CLOSED", () => {
+  // `undefined` is what `pageModels.length` yields when the parser returns an object.
+  assert.equal(catalogParseDiverges({ data: { models: [{ id: "x" }] } }, undefined), true);
+  assert.equal(catalogParseDiverges({ data: [] }, undefined), false);
+  assert.equal(catalogParseDiverges({ data: [{ id: "x" }] }, 1), false);
+});
+
+// ---------------------------------------------------------------------------
+// Round 15, BF-2 — the Antigravity discovery gate was shape-only.
+//
+// `hasModelsCollection` asked "is `models` an object?", so a 200 error envelope passed it and
+// `normalizeAntigravityModelsResponse` turned the map KEY `error` into a model named "error". The
+// sweep answered ok:true and that single bogus row replaced the whole catalog. `{models:[],
+// error:true}` passed too and deleted every row as an authoritative empty. The gate now delegates
+// to the same content-aware classifier the generic path uses.
+// ---------------------------------------------------------------------------
+const { normalizeAntigravityModelsResponse, hasCatalogCollection: hasCatalog } =
+  await import("../../src/app/api/providers/[id]/models/discovery/normalizers.ts");
+
+test("BF-2: an error envelope under `models` is not an Antigravity catalog", () => {
+  // The reason this mattered: the id→map branch turns every KEY into a model id.
+  assert.deepEqual(normalizeAntigravityModelsResponse({ models: { error: { code: 429 } } }), [
+    { id: "error", name: "error" },
+  ]);
+  // …and the gate must therefore refuse it.
+  assert.equal(hasCatalog({ models: { error: { code: 429 } } }), false);
+  assert.equal(hasCatalog({ models: { message: "quota exceeded" } }), false);
+  assert.equal(hasCatalog({ models: [{ error: { code: 429 } }] }), false);
+  assert.equal(hasCatalog({ models: [{}] }), false);
+});
+
+test("BF-2: an empty Antigravity catalog with a non-benign sibling is not authoritative", () => {
+  assert.equal(hasCatalog({ models: [], error: true }), false);
+  assert.equal(hasCatalog({ models: [], message: "quota exceeded" }), false);
+  assert.equal(hasCatalog({ models: {}, code: 429 }), false);
+  // Positive controls: the real empty answers and the real catalog forms still pass.
+  assert.equal(hasCatalog({ models: [] }), true);
+  assert.equal(hasCatalog({ models: {} }), true);
+  assert.equal(hasCatalog({ models: [{ id: "gemini-4-hydrogen-xhigh" }] }), true);
+  assert.equal(
+    hasCatalog({ models: { "gemini-4-hydrogen-xhigh": { displayName: "Extra High" } } }),
+    true
+  );
+});
+
+test("BF-2: the discovery sweep refuses a 200 error envelope instead of publishing `error`", async (t) => {
+  await resetStorage();
+  const original = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = original;
+  });
+
+  // Every discovery endpoint answers the same 200 error envelope. `ensureAntigravityProjectAssigned`
+  // and the version resolver use other URLs; they get a 503 like the F3 harness does.
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    const isDiscovery = url.includes(":fetchAvailableModels") || url.includes(":models");
+    if (!isDiscovery) return new Response("nope", { status: 503 });
+    return jsonResponse({ models: { error: { code: 429 } } });
+  }) as typeof fetch;
+
+  const { fetchAntigravityDiscoveryModelsCached } =
+    await import("../../src/app/api/providers/[id]/models/discovery/normalizers.ts");
+  const result = await fetchAntigravityDiscoveryModelsCached(
+    "ag-access",
+    "conn-bf2-error-envelope",
+    null,
+    { clientProfile: "ide" },
+    "antigravity"
+  );
+
+  // Refusing is the point: `ok:false` suppresses `authoritativeEmpty`, so no write happens. The
+  // rejected shape would otherwise normalize to a single model whose id is the map KEY `error`.
+  assert.equal(result.ok, false, "a 200 error envelope must not count as an authoritative sweep");
+  assert.deepEqual(result.models, []);
+});
+
+test("BF-2: an empty sweep with a non-benign sibling is not an authoritative empty", async (t) => {
+  await resetStorage();
+  const original = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = original;
+  });
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    const isDiscovery = url.includes(":fetchAvailableModels") || url.includes(":models");
+    if (!isDiscovery) return new Response("nope", { status: 503 });
+    return jsonResponse({ models: [], error: true });
+  }) as typeof fetch;
+
+  const { fetchAntigravityDiscoveryModelsCached } =
+    await import("../../src/app/api/providers/[id]/models/discovery/normalizers.ts");
+  const result = await fetchAntigravityDiscoveryModelsCached(
+    "ag-access",
+    "conn-bf2-empty-error",
+    null,
+    { clientProfile: "ide" },
+    "antigravity"
+  );
+
+  assert.equal(result.ok, false, "an empty list is only authoritative next to a clean envelope");
+});
+
+test("BF-2: a genuinely empty Antigravity sweep still reports ok", async (t) => {
+  await resetStorage();
+  const original = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = original;
+  });
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    const isDiscovery = url.includes(":fetchAvailableModels") || url.includes(":models");
+    if (!isDiscovery) return new Response("nope", { status: 503 });
+    return jsonResponse({ models: [] });
+  }) as typeof fetch;
+
+  const { fetchAntigravityDiscoveryModelsCached } =
+    await import("../../src/app/api/providers/[id]/models/discovery/normalizers.ts");
+  const result = await fetchAntigravityDiscoveryModelsCached(
+    "ag-access",
+    "conn-bf2-empty-clean",
+    null,
+    { clientProfile: "ide" },
+    "antigravity"
+  );
+
+  assert.equal(result.ok, true, "a bare empty catalog is still an authoritative answer");
+  assert.deepEqual(result.models, []);
+});
