@@ -108,6 +108,15 @@ const KNOWN_PLANS: Record<string, KnownPlanShape> = {
       { unit: "tokens", window: "weekly", limit: 126_000_000 },
     ],
   },
+  // Kenari subscription (plan Kreator): weekly + monthly percent windows.
+  // `window_5h` is null on Kreator (no 5-hour cap), so 5h must stay optional.
+  kenari: {
+    provider: "kenari",
+    dimensions: [
+      { unit: "percent", window: "weekly", limit: 100 },
+      { unit: "percent", window: "monthly", limit: 100 },
+    ],
+  },
 };
 
 export function getKnownPlan(provider: string): KnownPlanShape | null {

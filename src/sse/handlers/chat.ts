@@ -144,6 +144,7 @@ import { registerOpenrouterQuotaFetcher } from "@omniroute/open-sse/services/ope
 import { registerOpencodeQuotaFetcher } from "@omniroute/open-sse/services/opencodeQuotaFetcher.ts";
 import { registerGrokWebQuotaFetcher } from "@omniroute/open-sse/services/grokQuotaFetcher.ts";
 import { registerGenericQuotaFetchers } from "@omniroute/open-sse/services/genericQuotaFetcher.ts";
+import { registerKenariQuotaFetcher } from "@omniroute/open-sse/services/kenariQuotaFetcher.ts";
 import "@omniroute/open-sse/services/quotaTrackersBatch.ts";
 import {
   disableCooldownAwareRetry,
@@ -182,6 +183,11 @@ registerOpencodeQuotaFetcher();
 // precedence over the generic path (which can't resolve grok OIDC auth from
 // cookie-based connections).
 registerGrokWebQuotaFetcher();
+
+// Register Kenari subscription quota fetcher (cookie-based plan windows).
+// Bespoke so it registers with quotaMonitor too; the generic registrar skips
+// providers that already have a fetcher.
+registerKenariQuotaFetcher();
 
 // Register the generic quota fetcher for every other provider that has a
 // usage implementation in usage.ts but no bespoke preflight fetcher. This is

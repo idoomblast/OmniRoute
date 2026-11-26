@@ -302,6 +302,8 @@ export function sanitizeProviderSpecificDataForResponse(value: unknown): JsonRec
   delete sanitized.ollamaCloudUsageCookie;
   delete sanitized.ollamaCloudCookie;
   delete sanitized.usageCookie;
+  delete sanitized.kenariSessionCookie;
+  delete sanitized.kenariCookie;
   return sanitized;
 }
 

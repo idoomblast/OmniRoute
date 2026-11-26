@@ -457,6 +457,8 @@ export const USAGE_SUPPORTED_PROVIDERS = [
   "xao",
   // Firecrawl team credits (GET /v2/team/credit-usage)
   "firecrawl",
+  // Kenari subscription plan windows (cookie-based /api/subscription)
+  "kenari",
 ];
 
 // ── Zod validation at module load (Phase 7.2) ──
