@@ -14,22 +14,12 @@
 //     "Thinking level is unsupported: THINKING_LEVEL_XHIGH" for the fourth rung —
 //     one more reason tier ids must never resolve onto it.
 //   - Carbon/Argon/Neon exist in the catalog only as `*-disabled` entries.
+// FIRST import on purpose: it must evaluate before anything that transitively loads
+// `src/lib/db/core.ts` (the executor import below does). Setting DATA_DIR in this file's
+// body is NOT enough — the body runs after every hoisted import has already resolved it.
+import "./_dataDirIsolation.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-
-// This file asserts DEFAULT pricing. Another suite in the same run persists pricing
-// overrides through the real `key_value` table, and `node --test` runs each file in its
-// own process but against the SAME default DATA_DIR — so without this, whether F4 sees
-// $1.50 or a neighbour's $42 depends on file scheduling. Isolate before importing any
-// module that can resolve a DB path.
-const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-hydrogen-main-"));
-process.env.DATA_DIR = TEST_DATA_DIR;
-test.after(() => {
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
-});
 
 import {
   ANTIGRAVITY_MODEL_ALIASES,

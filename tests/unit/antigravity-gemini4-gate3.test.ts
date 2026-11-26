@@ -9,6 +9,10 @@
 //   F4b  an explicit `gemini-4-hydrogen` override lost to the canonical High default.
 //   F1b  the sender replaced a missing wire id with "unknown", so the requested-name
 //        fallback never ran and a tier request went out on the ide surface.
+// FIRST import on purpose: F4b below persists pricing overrides, and the imports after this
+// line transitively load `src/lib/db/core.ts`, which resolves DATA_DIR at import time. Without
+// it those overrides land in the operator's real ~/.omniroute database.
+import "./_dataDirIsolation.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 

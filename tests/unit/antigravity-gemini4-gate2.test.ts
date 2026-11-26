@@ -12,32 +12,13 @@
 //       back to the requested tier name and got cli headers.
 //   NB2 the translator tested the unresolved name, so the three display aliases
 //       raised max_tokens for a budget the executor then discards.
+import "./_dataDirIsolation.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
-// This file WRITES pricing overrides. Without an isolated DATA_DIR they land in the real
-// ~/.omniroute database and leak into every other suite that asserts default rates — the
-// F4 pricing assertions in antigravity-gemini4-hydrogen.test.ts then fail or pass
-// depending on scheduling. Isolate before importing anything that resolves a DB path.
-const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-hydrogen-gate2-"));
-process.env.DATA_DIR = TEST_DATA_DIR;
-test.after(() => {
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
-});
-
-// Dynamic, NOT static: ESM evaluates every static import before the module body runs, so
-// `process.env.DATA_DIR` above would be set only AFTER these modules (and the DB singleton
-// they pull in) had already resolved a data path — the override then lands in the real
-// ~/.omniroute database. Awaiting the imports keeps the isolation effective.
-const { resolveAntigravityEffectiveCredentials } =
-  await import("../../open-sse/executors/antigravity/executeAttempt.ts");
-const { resolveAntigravityModelId } =
-  await import("../../open-sse/config/antigravityModelAliases.ts");
-const { isDisabledAntigravityModelId } =
-  await import("../../open-sse/config/antigravityThinkingLevels.ts");
+import { resolveAntigravityEffectiveCredentials } from "../../open-sse/executors/antigravity/executeAttempt.ts";
+import { resolveAntigravityModelId } from "../../open-sse/config/antigravityModelAliases.ts";
+import { isDisabledAntigravityModelId } from "../../open-sse/config/antigravityThinkingLevels.ts";
 
 // ---------------------------------------------------------------------------
 // F1 — a present wire model is authoritative, even when it is NOT a tier.

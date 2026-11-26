@@ -221,11 +221,6 @@ export async function getPricingForModel(provider: string, model: string) {
     }
   }
 
-  // Resolve the table for the primary namespace (first hit) but keep every candidate
-  // for the per-model pass: an existing-but-partial table must not shadow a complete
-  // one, and a provider with no table at all must still reach `ag`.
-  if (!providerPricing && candidateNamespaces.length === 0) return null;
-
   const mLower = (model || "").toLowerCase();
   // Display aliases (`gemini-4-hydrogen`, `-extra`, `-max`) bill as the tier id they
   // route to. Scoped to the Antigravity namespace on purpose: applying the

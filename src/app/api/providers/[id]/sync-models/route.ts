@@ -531,6 +531,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     // yet. Persisting here — after the degraded and importable guards above have passed —
     // is what makes the sync's own write the first and only one. A body that carries no
     // models array says nothing about the catalog, so it must not clear what is stored.
+    //
+    // This write is not redundant with the one inside `importManagedModels`: that helper
+    // skips the replace when the discovered list is empty, precisely so a failed import
+    // cannot wipe rows. Here the empty list is authoritative (the sweep answered with an
+    // empty catalog), so the write has to happen unconditionally to clear the rows it
+    // replaced. Re-writing a non-empty list twice is idempotent.
     if (Array.isArray(modelsData.models)) {
       try {
         await persistDiscoveredModels(logProvider, id, allFetchedModels);

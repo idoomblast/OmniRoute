@@ -7,6 +7,10 @@
 //      tiers alongside the unrelated ide models, and publishes nothing cli-only;
 //   2. a failed sweep does NOT clear what is already published (last-known-good);
 //   3. a `*-disabled` row that reached the DB before the filter existed is not served.
+// FIRST import on purpose: this suite persists synced models, and the imports after this line
+// load `src/lib/db/core.ts`, which resolves DATA_DIR at import time. Without it the rows land in
+// the operator's real ~/.omniroute database and union into the live antigravity catalog.
+import "./_dataDirIsolation.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
