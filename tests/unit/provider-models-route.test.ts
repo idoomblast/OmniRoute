@@ -1052,11 +1052,10 @@ test("provider models route falls back through all Antigravity discovery endpoin
   assert.equal(response.status, 200);
   assert.equal(body.source, "local_catalog");
   assert.match(body.warning, /local catalog/i);
-  // Two sweeps (configured profile, then cli) over the same three :models URLs.
+  // The authorized profile failed completely. That is NOT authoritative emptiness, so
+  // the route keeps the last-known-good rows and never runs the cli supplement: a
+  // supplement can only describe tiers, and the account's non-tier catalog is unknown.
   assert.deepEqual(discoveryUrls, [
-    "https://daily-cloudcode-pa.googleapis.com/v1internal:models",
-    "https://cloudcode-pa.googleapis.com/v1internal:models",
-    "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:models",
     "https://daily-cloudcode-pa.googleapis.com/v1internal:models",
     "https://cloudcode-pa.googleapis.com/v1internal:models",
     "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:models",

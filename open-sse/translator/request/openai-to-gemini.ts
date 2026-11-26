@@ -41,6 +41,7 @@ import {
   buildHistoricalToolResultContext,
 } from "./openai-to-gemini/helpers.ts";
 import { isAntigravityGemini4TierModel } from "../../config/antigravityThinkingLevels.ts";
+import { resolveAntigravityModelId } from "../../config/antigravityModelAliases.ts";
 
 // Observed Antigravity wrapper output cap, not an underlying model capability.
 // Keep this bridge-local: Antigravity currently caps visible output around 16K.
@@ -731,7 +732,13 @@ function wrapInCloudCodeEnvelope(model, cloudCodeRequest, credentials = null) {
       generationConfig: applyAntigravityGenerationDefaults(cloudCodeRequest.generationConfig, {
         // Gemini 4 tier ids select their rung by model id and have the derived
         // thinkingBudget stripped later, so an ignored knob must not raise the cap.
-        skipThinkingBudgetBump: isAntigravityGemini4TierModel(cleanModel),
+        // The check must run on the RESOLVED id: the translator sees the name the
+        // caller sent, and `gemini-4-hydrogen`, `-extra`, and `-max` only become a
+        // tier id after alias resolution. Testing the raw name let all three aliases
+        // raise max_tokens (16 -> 24577) for a budget the executor then discards.
+        skipThinkingBudgetBump: isAntigravityGemini4TierModel(
+          resolveAntigravityModelId(cleanModel)
+        ),
       }),
       tools: cloudCodeRequest.tools,
       safetySettings: cloudCodeRequest.safetySettings,

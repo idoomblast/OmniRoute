@@ -78,6 +78,21 @@ export function isAntigravityGemini4TierModel(modelId: string | null | undefined
 }
 
 /**
+ * `gemini-4-carbon-disabled`, `gemini-4-argon-disabled`, and `gemini-4-neon-disabled`
+ * are advertised by the cli catalog for accounts that are NOT entitled to them. They
+ * carry no quota and answer 404 on generation, so they must never reach the public
+ * catalog.
+ *
+ * Lives here rather than in the discovery normalizer because both the write path
+ * (discovery) and the read path (`/v1/models` synced rows) have to reject them: a row
+ * synced before this rule existed would otherwise stay visible indefinitely.
+ */
+export function isDisabledAntigravityModelId(modelId: string | null | undefined): boolean {
+  if (typeof modelId !== "string") return false;
+  return /-disabled$/i.test(modelId.trim());
+}
+
+/**
  * The tier a Gemini 4 tier id encodes, or null when the id does not encode one.
  * `gemini-4-hydrogen-sonar`, the `-tiered-*` variants, and every other Gemini 4
  * family return null.

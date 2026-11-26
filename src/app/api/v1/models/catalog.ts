@@ -21,6 +21,7 @@ import {
 import { getAllRerankModels } from "@omniroute/open-sse/config/rerankRegistry";
 import { getAllAudioModels } from "@omniroute/open-sse/config/audioRegistry";
 import { getAllModerationModels } from "@omniroute/open-sse/config/moderationRegistry";
+import { isDisabledAntigravityModelId } from "@omniroute/open-sse/config/antigravityThinkingLevels";
 import { getAllVideoModels } from "@omniroute/open-sse/config/videoRegistry";
 import { getAllMusicModels } from "@omniroute/open-sse/config/musicRegistry";
 import { REGISTRY } from "@omniroute/open-sse/config/providerRegistry";
@@ -793,6 +794,11 @@ async function buildUnifiedModelsResponseCore(
 
         for (const sm of syncedModels) {
           if (!providerSupportsModel(canonicalProviderId, sm.id)) continue;
+          // A synced row may predate the disabled filter on the discovery path (the
+          // cli catalog advertises `gemini-4-*-disabled` for unentitled accounts).
+          // Filtering only at sync time leaves stale rows visible until something
+          // refreshes them, so reject them on read as well.
+          if (isDisabledAntigravityModelId(sm.id)) continue;
           if (canonicalProviderId === "codex" && isCodexDiscoveryModelExcluded(sm)) {
             continue;
           }

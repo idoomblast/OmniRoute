@@ -12,6 +12,10 @@ import {
   toClientAntigravityModelId,
 } from "@omniroute/open-sse/config/antigravityModelAliases.ts";
 import {
+  isAntigravityGemini4TierModel,
+  isDisabledAntigravityModelId,
+} from "@omniroute/open-sse/config/antigravityThinkingLevels.ts";
+import {
   getClientVisibleAgyModelName,
   isDiscoverableAgyModelId,
 } from "@omniroute/open-sse/config/agyModels.ts";
@@ -20,10 +24,18 @@ import { ensureAntigravityProjectAssigned } from "@omniroute/open-sse/services/a
 import { persistDiscoveredAntigravityProjectId } from "@omniroute/open-sse/services/antigravityProjectPersist.ts";
 import { asRecord, toNonEmptyString } from "./helpers";
 
-const antigravityDiscoveryInflight = new Map<
-  string,
-  Promise<Array<{ id: string; name: string }>>
->();
+const antigravityDiscoveryInflight = new Map<string, Promise<AntigravityDiscoveryResult>>();
+
+/** Result of a discovery sweep: models plus whether the upstream authority answered. */
+export type AntigravityDiscoveryResult = {
+  models: Array<{ id: string; name: string }>;
+  /**
+   * False when every discovery endpoint failed. Callers MUST NOT treat that as an
+   * authoritative empty catalog — doing so persists an empty union over healthy
+   * rows and deletes working models after a transient upstream error.
+   */
+  ok: boolean;
+};
 
 type AntigravityDiscoveryModel = {
   id: string;
@@ -87,14 +99,10 @@ export function filterUserCallableAntigravityModels(
 }
 
 /**
- * `gemini-4-carbon-disabled`, `gemini-4-argon-disabled`, and `gemini-4-neon-disabled`
- * are advertised by the cli catalog for accounts that are NOT entitled to them. They
- * carry no quota and answer 404 on generation, so they must never reach the public
- * catalog even when the upstream forgets to flag them `isInternal`.
+ * Re-exported so existing callers of the discovery module keep working; the single
+ * definition (and its rationale) lives in the catalog fact module.
  */
-export function isDisabledAntigravityModelId(modelId: string): boolean {
-  return /-disabled$/i.test(modelId.trim());
-}
+export { isDisabledAntigravityModelId };
 
 export function mapAntigravityModelForClient(
   model: { id: string; name: string },
@@ -119,13 +127,13 @@ export async function fetchAntigravityDiscoveryModelsCached(
   proxy: unknown,
   providerSpecificData?: unknown,
   provider: "antigravity" | "agy" = "antigravity"
-): Promise<Array<{ id: string; name: string }>> {
+): Promise<AntigravityDiscoveryResult> {
   const profile = normalizeAntigravityClientProfile(asRecord(providerSpecificData).clientProfile);
   const cacheKey = `${provider}:${connectionId}:${accessToken.substring(0, 16)}:${profile}`;
   const inflight = antigravityDiscoveryInflight.get(cacheKey);
   if (inflight) return inflight;
 
-  const promise = (async () => {
+  const promise = (async (): Promise<AntigravityDiscoveryResult> => {
     await resolveAntigravityClientVersion(profile);
     const discovered = await ensureAntigravityProjectAssigned(accessToken, fetch, profile);
     if (discovered) {
@@ -138,31 +146,36 @@ export async function fetchAntigravityDiscoveryModelsCached(
       );
     }
 
-    // Gemini 4 Hydrogen tier ids (low|medium|high|xhigh) are only advertised by the
-    // cli catalog: the ide catalog lists 17 models and contains none of them. Synced
-    // models REPLACE the static catalog downstream, so a purely ide-profile sync
-    // silently drops all four tiers from /v1/models. Merge the cli catalog's
-    // account-entitled tier ids in without disturbing the connection's stored profile
-    // or replacing unrelated ide models.
-    const keys = profile === "cli" ? ["cli"] : [profile, "cli"];
-    const merged: Array<{ id: string; name: string }> = [];
-    const seen = new Set<string>();
-
-    for (const key of keys) {
-      const models = await discoverAntigravityModelsForKey(
-        key as AntigravityClientProfile,
-        accessToken,
-        proxy,
-        provider
-      );
-      for (const model of models) {
-        if (seen.has(model.id)) continue;
-        seen.add(model.id);
-        merged.push(model);
-      }
+    // The connection's own profile is the AUTHORITATIVE catalog: it is what this
+    // account actually sees, and it owns every non-tier model. A failed sweep here
+    // is NOT authoritative emptiness — reporting [] would let the route persist an
+    // empty union over a healthy catalog, deleting working models because a
+    // transient 503 hit the one profile that matters.
+    const primary = await discoverAntigravityModelsForKey(profile, accessToken, proxy, provider);
+    if (!primary.ok) {
+      return { models: [], ok: false };
     }
 
-    return merged;
+    // Gemini 4 Hydrogen tier ids (low|medium|high|xhigh) are advertised only by the
+    // cli catalog: the ide catalog lists 17 models and contains none of them. If the
+    // connection runs ide, supplement the authoritative catalog with EXACTLY the four
+    // entitled tier ids — never the rest of the cli catalog, which would publish
+    // unrelated cli-only models the non-tier path deliberately keeps on ide.
+    if (profile === "cli") {
+      return { models: primary.models, ok: true };
+    }
+
+    const merged = [...primary.models];
+    const seen = new Set(merged.map((model) => model.id));
+    const cli = await discoverAntigravityModelsForKey("cli", accessToken, proxy, provider);
+    for (const model of cli.models) {
+      if (!isAntigravityGemini4TierModel(model.id)) continue;
+      if (seen.has(model.id)) continue;
+      seen.add(model.id);
+      merged.push(model);
+    }
+
+    return { models: merged, ok: true };
   })().finally(() => {
     antigravityDiscoveryInflight.delete(cacheKey);
   });
@@ -172,15 +185,17 @@ export async function fetchAntigravityDiscoveryModelsCached(
 }
 
 /**
- * One discovery pass for a single client profile. Returns models mapped into the
- * client namespace, or an empty list when every discovery URL fails.
+ * One discovery pass for a single client profile. `ok` reports whether any discovery
+ * URL answered successfully — an empty `models` list with `ok: true` means the
+ * upstream authoritatively returned nothing, which is a different fact from a sweep
+ * where every endpoint failed.
  */
 async function discoverAntigravityModelsForKey(
   profile: AntigravityClientProfile,
   accessToken: string,
   proxy: unknown,
   provider: "antigravity" | "agy"
-): Promise<Array<{ id: string; name: string }>> {
+): Promise<{ models: Array<{ id: string; name: string }>; ok: boolean }> {
   await resolveAntigravityClientVersion(profile);
 
   for (const discoveryUrl of [
@@ -209,16 +224,14 @@ async function discoverAntigravityModelsForKey(
         normalizeAntigravityModelsResponse(await response.json()),
         provider
       ).map((model) => mapAntigravityModelForClient(model, provider));
-      if (models.length > 0) {
-        return models;
-      }
+      return { models, ok: true };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn(`[models] ${provider} discovery threw for ${discoveryUrl}: ${message}`);
     }
   }
 
-  return [];
+  return { models: [], ok: false };
 }
 
 export function normalizeDataRobotCatalogResponse(

@@ -83,10 +83,7 @@ import {
   isAutoFetchModelsEnabled,
   persistDiscoveredModels,
 } from "@/lib/providerModels/modelDiscovery";
-import {
-  buildProviderModelsUrl,
-  getDiscoveryClientVersionOptions,
-} from "./discoveryClientVersion";
+import { buildProviderModelsUrl, getDiscoveryClientVersionOptions } from "./discoveryClientVersion";
 import {
   parseGeminiModelsList,
   type GeminiDiscoveryModel,
@@ -1577,15 +1574,31 @@ export async function GET(
         });
       }
 
-      const remoteModels = await fetchAntigravityDiscoveryModelsCached(
+      const discovery = await fetchAntigravityDiscoveryModelsCached(
         accessToken,
         connectionId,
         proxy,
         connection.providerSpecificData,
         provider
       );
-      if (remoteModels.length > 0) {
-        return buildApiDiscoveryResponse(remoteModels);
+      // A sweep where every endpoint failed says nothing about what the account can
+      // use. Persisting the empty union would delete healthy rows (and, on the reverse
+      // failure, the cli-only tier ids) from the public catalog, so keep the
+      // last-known-good synced rows instead and surface the degraded source.
+      if (!discovery.ok) {
+        const fallback = buildDiscoveryFallbackResponse();
+        if (fallback) return fallback;
+
+        return buildResponse({
+          provider,
+          connectionId,
+          models: staticModels,
+          source: "local_catalog",
+          ...(usesCuratedModelsOnly ? {} : { warning: "API unavailable — using local catalog" }),
+        });
+      }
+      if (discovery.models.length > 0) {
+        return buildApiDiscoveryResponse(discovery.models);
       }
 
       const fallback = buildDiscoveryFallbackResponse();

@@ -148,17 +148,28 @@ export async function getPricingForModel(provider: string, model: string) {
 
   const pLower = (provider || "").toLowerCase();
   let providerPricing = findKeyInsensitive<PricingModels>(pricing, pLower);
+  // Namespaces this provider may legitimately bill under, in priority order. Used
+  // for per-model fallback below: a provider's own table can exist and still not
+  // carry a given model (a single unrelated override row), so resolving the TABLE
+  // is not enough — the MODEL has to be looked up in each candidate namespace.
+  const candidateNamespaces: string[] = [pLower];
 
   if (!providerPricing) {
     const alias = findKeyInsensitive<string>(PROVIDER_ID_TO_ALIAS, pLower);
-    if (alias) providerPricing = findKeyInsensitive(pricing, alias);
+    if (alias) {
+      providerPricing = findKeyInsensitive(pricing, alias);
+      if (alias !== pLower) candidateNamespaces.push(alias.toLowerCase());
+    }
   }
 
   if (!providerPricing) {
     for (const [id, mappedAlias] of Object.entries(PROVIDER_ID_TO_ALIAS)) {
       if (typeof mappedAlias === "string" && mappedAlias.toLowerCase() === pLower) {
         providerPricing = findKeyInsensitive(pricing, id);
-        if (providerPricing) break;
+        if (providerPricing) {
+          candidateNamespaces.push(id.toLowerCase());
+          break;
+        }
       }
     }
   }
@@ -168,36 +179,65 @@ export async function getPricingForModel(provider: string, model: string) {
   // `agy` maps to itself). Without this mapping every Antigravity model — including
   // the Gemini 4 Hydrogen tiers — resolves to null and cost/quota accounting silently
   // falls back to $0.
-  if (!providerPricing) {
-    const namespace = PRICING_PROVIDER_NAMESPACE[pLower];
-    if (namespace) providerPricing = findKeyInsensitive(pricing, namespace);
-  }
+  const namespace = PRICING_PROVIDER_NAMESPACE[pLower];
+  if (namespace) candidateNamespaces.push(namespace.toLowerCase());
 
   if (!providerPricing) {
+    // Preserve the historical `-cn` suffix stripping as a table-level fallback.
     const np = pLower.replace(/-cn$/, "");
     if (np && np !== pLower) {
       providerPricing = findKeyInsensitive(pricing, np);
+      candidateNamespaces.push(np);
     }
   }
 
-  if (!providerPricing) return null;
+  // Resolve the table for the primary namespace (first hit) but keep every candidate
+  // for the per-model pass: an existing-but-partial table must not shadow a complete
+  // one, and a provider with no table at all must still reach `ag`.
+  if (!providerPricing && candidateNamespaces.length === 0) return null;
 
   const mLower = (model || "").toLowerCase();
   // Display aliases (`gemini-4-hydrogen`, `-extra`, `-max`) bill as the tier id they
-  // route to, so resolve through the same alias table the executor uses.
-  const canonicalModel = resolveAntigravityModelId(mLower);
-  let modelPricing = findKeyInsensitive<JsonRecord>(providerPricing, canonicalModel);
+  // route to. Scoped to the Antigravity namespace on purpose: applying the
+  // Antigravity alias table to every provider rewrote unrelated ids (a Gemini exact
+  // row at $1 was replaced by its `-high` row at $3).
+  const isAntigravityNamespace = candidateNamespaces.some(
+    (ns) => ns === "antigravity" || ns === "agy" || ns === "ag"
+  );
+  const canonicalModel = isAntigravityNamespace ? resolveAntigravityModelId(mLower) : mLower;
 
-  if (!modelPricing && canonicalModel !== mLower) {
-    modelPricing = findKeyInsensitive<JsonRecord>(providerPricing, mLower);
+  const lookupModel = (table: PricingModels): JsonRecord | undefined => {
+    let hit = findKeyInsensitive<JsonRecord>(table, canonicalModel);
+    if (!hit && canonicalModel !== mLower) {
+      hit = findKeyInsensitive<JsonRecord>(table, mLower);
+    }
+    if (!hit) {
+      hit = findKeyInsensitive(table, mLower.replace(/\./g, "-"));
+    }
+    return hit;
+  };
+
+  const searchOrder = providerPricing
+    ? [
+        providerPricing,
+        ...candidateNamespaces
+          .filter((ns) => ns !== pLower)
+          .map((ns) => findKeyInsensitive<PricingModels>(pricing, ns))
+          .filter((t): t is PricingModels => Boolean(t)),
+      ]
+    : candidateNamespaces
+        .map((ns) => findKeyInsensitive<PricingModels>(pricing, ns))
+        .filter((t): t is PricingModels => Boolean(t));
+
+  const tried = new Set<PricingModels>();
+  for (const table of searchOrder) {
+    if (tried.has(table)) continue;
+    tried.add(table);
+    const hit = lookupModel(table);
+    if (hit) return hit;
   }
 
-  if (!modelPricing) {
-    const hyphenModel = mLower.replace(/\./g, "-");
-    modelPricing = findKeyInsensitive(providerPricing, hyphenModel);
-  }
-
-  return modelPricing || null;
+  return null;
 }
 
 export async function updatePricing(pricingData: PricingByProvider) {

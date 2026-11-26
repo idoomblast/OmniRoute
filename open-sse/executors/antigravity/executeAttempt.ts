@@ -20,6 +20,7 @@ import {
   removeHeaderCaseInsensitive,
 } from "../../services/antigravityClientProfile.ts";
 import { resolveAntigravityClientProfileForModel } from "../../config/antigravityThinkingLevels.ts";
+import { resolveAntigravityModelId } from "../../config/antigravityModelAliases.ts";
 import * as prl from "../../utils/providerRequestLogging.ts";
 import {
   createCreditsExtractionTransform as createCreditsExtractionTransformImpl,
@@ -275,17 +276,23 @@ function getRequestTargetModel(body: Record<string, unknown>): string {
  * from the requested alias would send the alias's tiers with ide headers.
  *
  * `wireModel` comes from the serialized body's envelope `model` field, so it is
- * already alias-resolved. `requestedModel` is only a fallback for the (defensive)
- * case where the body carries no model.
+ * already alias-resolved. Whenever it is present it is authoritative, including
+ * when it is deliberately NOT a tier id: a persisted MITM alias can remap a tier
+ * request onto `-sonar`, and `-sonar` is served by the ide surface. Falling back
+ * to the requested name in that case would send a non-tier wire id with cli
+ * headers, so the requested name is consulted only when the wire id is missing.
  */
 export function resolveAntigravityEffectiveCredentials(
   credentials: AntigravityCredentials,
   wireModel: string | null | undefined,
   requestedModel?: string | null | undefined
 ): AntigravityCredentials {
-  const profile =
-    resolveAntigravityClientProfileForModel(wireModel) ??
-    resolveAntigravityClientProfileForModel(requestedModel);
+  const hasWireModel = typeof wireModel === "string" && wireModel.trim().length > 0;
+  const profile = hasWireModel
+    ? resolveAntigravityClientProfileForModel(wireModel)
+    : // No wire id to read: infer from what was requested, alias-resolved exactly as
+      // transform would have done (`-extra`/`-max` are aliases, not canonical ids).
+      resolveAntigravityClientProfileForModel(resolveAntigravityModelId(requestedModel ?? ""));
   if (!profile) return credentials;
   // `getAntigravityClientProfile` reads providerSpecificData.clientProfile and
   // nothing else, so that is the only field that has to move.

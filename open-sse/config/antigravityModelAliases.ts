@@ -126,12 +126,24 @@ const ANTIGRAVITY_NON_CHAT_MODEL_PATTERN =
 
 export function resolveAntigravityModelId(modelId: string): string {
   if (!modelId) return modelId;
-  return (ANTIGRAVITY_MODEL_ALIASES as AntigravityModelAliasMap)[modelId] || modelId;
+  // Own-property lookup: a plain object literal also carries `constructor`,
+  // `__proto__`, `toString`, and friends. Returning those (or a non-string) for a
+  // caller that expects a model id makes `findKeyInsensitive` iterate a function and
+  // throw. Unknown ids must always come back as themselves.
+  if (!Object.prototype.hasOwnProperty.call(ANTIGRAVITY_MODEL_ALIASES, modelId)) {
+    return modelId;
+  }
+  const mapped = (ANTIGRAVITY_MODEL_ALIASES as AntigravityModelAliasMap)[modelId];
+  return typeof mapped === "string" && mapped ? mapped : modelId;
 }
 
 export function toClientAntigravityModelId(modelId: string): string {
   if (!modelId) return modelId;
-  return ANTIGRAVITY_REVERSE_MODEL_ALIASES[modelId] || modelId;
+  if (!Object.prototype.hasOwnProperty.call(ANTIGRAVITY_REVERSE_MODEL_ALIASES, modelId)) {
+    return modelId;
+  }
+  const mapped = ANTIGRAVITY_REVERSE_MODEL_ALIASES[modelId];
+  return typeof mapped === "string" && mapped ? mapped : modelId;
 }
 
 // Retired/hidden upstream preview buckets that must be dropped from client-facing usage.
