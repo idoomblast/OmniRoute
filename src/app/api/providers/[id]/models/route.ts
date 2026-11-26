@@ -104,7 +104,9 @@ import {
   buildNamedOpenAiStyleHeaders,
 } from "./discovery/helpers";
 import {
+  DEGRADED_TIER_WARNING,
   fetchAntigravityDiscoveryModelsCached,
+  mergeLastKnownTiers,
   normalizeDataRobotCatalogResponse,
   normalizeOpenAiLikeModelsResponse,
   normalizeSapModelsResponse,
@@ -1584,21 +1586,50 @@ export async function GET(
       // A sweep where every endpoint failed says nothing about what the account can
       // use. Persisting the empty union would delete healthy rows (and, on the reverse
       // failure, the cli-only tier ids) from the public catalog, so keep the
-      // last-known-good synced rows instead and surface the degraded source.
+      // last-known-good synced rows instead and surface the degraded source. The
+      // `discoveryDegraded` marker is what model-sync reads to refuse the write: the
+      // models below are cached state, not a fresh import source.
       if (!discovery.ok) {
         const fallback = buildDiscoveryFallbackResponse();
-        if (fallback) return fallback;
+        if (fallback) {
+          return buildResponse({
+            ...(await fallback.json()),
+            discoveryDegraded: true,
+          });
+        }
 
         return buildResponse({
           provider,
           connectionId,
           models: staticModels,
           source: "local_catalog",
+          discoveryDegraded: true,
           ...(usesCuratedModelsOnly ? {} : { warning: "API unavailable — using local catalog" }),
         });
       }
       if (discovery.models.length > 0) {
-        return buildApiDiscoveryResponse(discovery.models);
+        // The cli supplement failed: the primary catalog is complete for non-tier
+        // models, but we cannot see the tier ids this sweep. Merge the connection's
+        // last-known-good tiers back in so a cli outage does not delete four working
+        // models; the primary sweep stays authoritative for everything else.
+        const persisted = discovery.degraded
+          ? mergeLastKnownTiers(discovery.models, cachedDiscoveryModels)
+          : discovery.models;
+        const warning = discovery.degraded ? DEGRADED_TIER_WARNING : undefined;
+        const discoveredModels = await persistDiscoveredModels(provider, connectionId, persisted);
+        if (discoveredModels.length > 0) {
+          const mergedModels = mergeSpecialtyCatalogIntoLiveModels(persisted, provider);
+          return buildResponse({
+            provider,
+            connectionId,
+            models: mergedModels,
+            source: "api",
+            ...(warning ? { warning } : {}),
+            // Tier rows here may be last-known-good rather than freshly discovered.
+            ...(discovery.degraded ? { discoveryDegraded: true } : {}),
+          });
+        }
+        // Empty after persistence: fall through to the shared cached/local path below.
       }
 
       const fallback = buildDiscoveryFallbackResponse();

@@ -1506,6 +1506,7 @@ export class AntigravityExecutor extends BaseExecutor {
     const {
       response,
       url,
+      model,
       headers,
       transformedBody,
       credentials,
@@ -1566,7 +1567,9 @@ export class AntigravityExecutor extends BaseExecutor {
           signal,
           log,
           accountId,
-          updateAntigravityRemainingCredits
+          updateAntigravityRemainingCredits,
+          // Carried so the retry can infer the profile when the envelope has no model.
+          model
         );
         if (creditsResult) return { kind: "return", result: creditsResult };
         if (retryMs) markConnectionQuotaExhausted(accountId, retryMs);

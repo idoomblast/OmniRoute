@@ -26,7 +26,9 @@ import { asRecord, toNonEmptyString } from "./helpers";
 
 const antigravityDiscoveryInflight = new Map<string, Promise<AntigravityDiscoveryResult>>();
 
-/** Result of a discovery sweep: models plus whether the upstream authority answered. */
+/**
+ * Result of a discovery sweep: models plus whether the upstream authority answered.
+ */
 export type AntigravityDiscoveryResult = {
   models: Array<{ id: string; name: string }>;
   /**
@@ -35,7 +37,26 @@ export type AntigravityDiscoveryResult = {
    * rows and deletes working models after a transient upstream error.
    */
   ok: boolean;
+  /**
+   * True when the connection's own profile answered but the cli supplement did not.
+   * The returned models are then complete for the account's non-tier catalog but say
+   * nothing about the tier ids, so the caller must merge rather than replace: replacing
+   * drops the four tiers that were working a minute ago.
+   */
+  degraded?: boolean;
 };
+
+/**
+ * Whether a discovery payload actually carries a models collection. `models` may be an
+ * array (or an id→model map); anything else means the body is not a catalog answer, so
+ * its emptiness must not be read as authoritative.
+ */
+function hasModelsCollection(payload: unknown): boolean {
+  const models = asRecord(payload).models;
+  if (Array.isArray(models)) return true;
+  const map = asRecord(models);
+  return Object.keys(map).length > 0;
+}
 
 type AntigravityDiscoveryModel = {
   id: string;
@@ -96,6 +117,34 @@ export function filterUserCallableAntigravityModels(
         ? isDiscoverableAgyModelId(model.id)
         : isDiscoverableAntigravityModelId(model.id))
   );
+}
+
+/**
+ * Warning surfaced when the cli supplement fails but the primary sweep succeeded: the
+ * tier rows come from last-known-good state rather than this refresh.
+ */
+export const DEGRADED_TIER_WARNING =
+  "CLI model discovery failed — Gemini 4 tier models kept from the last successful refresh";
+
+/**
+ * Re-add the four Hydrogen tier ids from the connection's last-known-good rows when a
+ * cli sweep failed. Everything else stays exactly as the primary sweep reported: the
+ * authoritative profile owns the non-tier catalog, and the supplement can only ever
+ * contribute tiers.
+ */
+export function mergeLastKnownTiers(
+  models: Array<{ id: string; name: string }>,
+  lastKnownGood: ReadonlyArray<{ id: string; name: string }>
+): Array<{ id: string; name: string }> {
+  const merged = [...models];
+  const seen = new Set(merged.map((model) => model.id));
+  for (const model of lastKnownGood) {
+    if (!isAntigravityGemini4TierModel(model.id)) continue;
+    if (seen.has(model.id)) continue;
+    seen.add(model.id);
+    merged.push({ id: model.id, name: model.name || model.id });
+  }
+  return merged;
 }
 
 /**
@@ -175,7 +224,12 @@ export async function fetchAntigravityDiscoveryModelsCached(
       merged.push(model);
     }
 
-    return { models: merged, ok: true };
+    // A cli outage says nothing about the tier ids: the account still has them, we
+    // just could not see them this sweep. Reporting `degraded` lets the caller keep
+    // the tiers it already has instead of persisting an ide-only union that deletes
+    // all four. A successful but empty cli catalog is authoritative and NOT degraded —
+    // that would be a real entitlement change.
+    return { models: merged, ok: true, degraded: !cli.ok };
   })().finally(() => {
     antigravityDiscoveryInflight.delete(cacheKey);
   });
@@ -220,10 +274,21 @@ async function discoverAntigravityModelsForKey(
         continue;
       }
 
+      const payload = await response.json();
       const models = filterUserCallableAntigravityModels(
-        normalizeAntigravityModelsResponse(await response.json()),
+        normalizeAntigravityModelsResponse(payload),
         provider
       ).map((model) => mapAntigravityModelForClient(model, provider));
+      // An empty list is only authoritative if the body actually HAD a models
+      // collection. A 200 with an unexpected shape (an error envelope, a redirect page)
+      // carries no information about the catalog, and treating it as "the account has
+      // nothing" would suppress a healthy later endpoint and publish a partial catalog.
+      if (!hasModelsCollection(payload)) {
+        console.warn(
+          `[models] ${provider} discovery at ${discoveryUrl} returned no models collection — skipping`
+        );
+        continue;
+      }
       return { models, ok: true };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

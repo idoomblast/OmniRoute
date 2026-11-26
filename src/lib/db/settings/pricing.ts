@@ -134,6 +134,27 @@ export async function getPricingWithSources(): Promise<{
 export async function getPricingForModel(provider: string, model: string) {
   const pricing = await getPricing();
 
+  const RATE_KEYS = ["input", "output", "cached"] as const;
+
+  const hasAllRates = (row: JsonRecord): boolean =>
+    RATE_KEYS.every((key) => typeof row[key] === "number" && Number.isFinite(row[key] as number));
+
+  /**
+   * Fill rates a row omits from a more complete fallback row. A user override that only
+   * sets `input` is a legitimate partial override; leaving `output` undefined makes the
+   * calculator bill 0 for output tokens instead of the default rate.
+   */
+  const mergeMissingRates = (row: JsonRecord, fallback: JsonRecord): JsonRecord => {
+    const merged: JsonRecord = { ...row };
+    for (const key of RATE_KEYS) {
+      if (typeof merged[key] === "number" && Number.isFinite(merged[key] as number)) continue;
+      if (typeof fallback[key] === "number" && Number.isFinite(fallback[key] as number)) {
+        merged[key] = fallback[key];
+      }
+    }
+    return merged;
+  };
+
   const findKeyInsensitive = <T>(
     obj: Record<string, T> | undefined | null,
     key: string
@@ -179,7 +200,9 @@ export async function getPricingForModel(provider: string, model: string) {
   // `agy` maps to itself). Without this mapping every Antigravity model — including
   // the Gemini 4 Hydrogen tiers — resolves to null and cost/quota accounting silently
   // falls back to $0.
-  const namespace = PRICING_PROVIDER_NAMESPACE[pLower];
+  const namespace = Object.prototype.hasOwnProperty.call(PRICING_PROVIDER_NAMESPACE, pLower)
+    ? PRICING_PROVIDER_NAMESPACE[pLower]
+    : undefined;
   if (namespace) candidateNamespaces.push(namespace.toLowerCase());
 
   if (!providerPricing) {
@@ -207,9 +230,13 @@ export async function getPricingForModel(provider: string, model: string) {
   const canonicalModel = isAntigravityNamespace ? resolveAntigravityModelId(mLower) : mLower;
 
   const lookupModel = (table: PricingModels): JsonRecord | undefined => {
-    let hit = findKeyInsensitive<JsonRecord>(table, canonicalModel);
+    // An explicit row for the model the caller asked for wins over the canonical
+    // default it routes to: a user who pins `gemini-4-hydrogen` to $42 means that row,
+    // not the High tier it resolves onto. Check the exact name first, then the alias
+    // target, then the dotted-form normalisation.
+    let hit = findKeyInsensitive<JsonRecord>(table, mLower);
     if (!hit && canonicalModel !== mLower) {
-      hit = findKeyInsensitive<JsonRecord>(table, mLower);
+      hit = findKeyInsensitive<JsonRecord>(table, canonicalModel);
     }
     if (!hit) {
       hit = findKeyInsensitive(table, mLower.replace(/\./g, "-"));
@@ -230,11 +257,56 @@ export async function getPricingForModel(provider: string, model: string) {
         .filter((t): t is PricingModels => Boolean(t));
 
   const tried = new Set<PricingModels>();
+
+  /**
+   * Look up the model name the CALLER asked for, ignoring alias resolution.
+   *
+   * An explicit row for `gemini-4-hydrogen` is a user's deliberate override of that
+   * model; it must beat the canonical tier default it routes to, even when the override
+   * only sets some rates (those are filled in afterwards from the fallback row).
+   */
+  const findExactRow = (): JsonRecord | null => {
+    for (const table of searchOrder) {
+      if (tried.has(table)) continue;
+      tried.add(table);
+      const hit =
+        findKeyInsensitive<JsonRecord>(table, mLower) ??
+        findKeyInsensitive<JsonRecord>(table, mLower.replace(/\./g, "-"));
+      if (hit) return hit;
+    }
+    return null;
+  };
+
+  const exactRow = findExactRow();
+  if (exactRow) {
+    let merged = exactRow;
+    for (const table of searchOrder) {
+      const fallback = lookupModel(table);
+      if (fallback) merged = mergeMissingRates(merged, fallback);
+    }
+    return merged;
+  }
+
+  tried.clear();
+  let primaryHit: JsonRecord | null = null;
   for (const table of searchOrder) {
     if (tried.has(table)) continue;
     tried.add(table);
     const hit = lookupModel(table);
-    if (hit) return hit;
+    if (!hit) continue;
+    if (!primaryHit) primaryHit = hit;
+    // A canonical row that carries only some rates must not zero the ones it omits.
+    // Keep looking for a more complete row and merge, rather than returning a partial
+    // row that makes output tokens free.
+    if (hasAllRates(hit)) return hit;
+  }
+
+  if (primaryHit) {
+    for (const table of searchOrder) {
+      const fallback = lookupModel(table);
+      if (fallback) primaryHit = mergeMissingRates(primaryHit, fallback);
+    }
+    return primaryHit;
   }
 
   return null;

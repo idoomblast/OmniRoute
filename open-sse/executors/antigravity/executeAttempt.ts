@@ -268,6 +268,30 @@ function getRequestTargetModel(body: Record<string, unknown>): string {
 }
 
 /**
+ * The model the upstream will actually see, or null when the envelope carries none.
+ *
+ * Distinct from `getRequestTargetModel`, which substitutes `"unknown"` for logging.
+ * That placeholder must never reach profile selection: it is a present, non-tier id, so
+ * a resolver keyed on "is there a wire id at all" would treat it as authoritative and
+ * drop the requested-name fallback — sending a tier request out on the ide surface.
+ */
+function getWireModel(body: Record<string, unknown>): string | null {
+  const target = body.model;
+  return typeof target === "string" && target.trim().length > 0 ? target.trim() : null;
+}
+
+/**
+ * Strip a provider prefix (`antigravity/`, `agy/`) so a requested name is compared in
+ * the same namespace as a wire id. The wire envelope always carries a bare id, but the
+ * caller-supplied name may be qualified, and `antigravity/gemini-4-hydrogen-extra`
+ * would otherwise miss the alias table and keep the ide fingerprint.
+ */
+function bareModelId(modelId: string): string {
+  const trimmed = modelId.trim();
+  return trimmed.includes("/") ? (trimmed.split("/").pop() ?? trimmed) : trimmed;
+}
+
+/**
  * Credentials whose client profile can actually serve the model on the wire.
  *
  * The profile MUST be chosen from the id the upstream will see, not from the name
@@ -281,6 +305,9 @@ function getRequestTargetModel(body: Record<string, unknown>): string {
  * request onto `-sonar`, and `-sonar` is served by the ide surface. Falling back
  * to the requested name in that case would send a non-tier wire id with cli
  * headers, so the requested name is consulted only when the wire id is missing.
+ *
+ * A caller must pass `null` here — never a logging placeholder like `"unknown"` —
+ * for a missing wire id, or the fallback above can never run.
  */
 export function resolveAntigravityEffectiveCredentials(
   credentials: AntigravityCredentials,
@@ -289,10 +316,12 @@ export function resolveAntigravityEffectiveCredentials(
 ): AntigravityCredentials {
   const hasWireModel = typeof wireModel === "string" && wireModel.trim().length > 0;
   const profile = hasWireModel
-    ? resolveAntigravityClientProfileForModel(wireModel)
+    ? resolveAntigravityClientProfileForModel(bareModelId(wireModel))
     : // No wire id to read: infer from what was requested, alias-resolved exactly as
       // transform would have done (`-extra`/`-max` are aliases, not canonical ids).
-      resolveAntigravityClientProfileForModel(resolveAntigravityModelId(requestedModel ?? ""));
+      resolveAntigravityClientProfileForModel(
+        resolveAntigravityModelId(bareModelId(requestedModel ?? ""))
+      );
   if (!profile) return credentials;
   // `getAntigravityClientProfile` reads providerSpecificData.clientProfile and
   // nothing else, so that is the only field that has to move.
@@ -383,7 +412,7 @@ export async function sendAntigravityRequest(
   // `gemini-4-hydrogen-extra` get the cli fingerprint too.
   const effectiveCredentials = resolveAntigravityEffectiveCredentials(
     credentials,
-    getRequestTargetModel(transformedBody),
+    getWireModel(transformedBody),
     model
   );
   const clientProfile = applyAntigravityClientProfileHeaders(
@@ -454,7 +483,8 @@ export async function tryCreditsRetry(
   signal: AbortSignal | null | undefined,
   log: SafeAntigravityLog,
   accountId: string,
-  onCreditsUpdate: OnAntigravityCreditsUpdate
+  onCreditsUpdate: OnAntigravityCreditsUpdate,
+  requestedModel?: string | null
 ): Promise<SsePassthroughResult | null> {
   log.info("AG_CREDITS", "Retrying with Google One AI credits");
   const creditsBody = attachToolNameMap(
@@ -466,13 +496,14 @@ export async function tryCreditsRetry(
   // Same effective-profile selection as the initial send: the credits retry must
   // carry the cli fingerprint for a Gemini 4 tier id, otherwise the retry re-sends
   // the tier with the connection's ide identity and gets a 404.
+  const effectiveCreditsCredentials = resolveAntigravityEffectiveCredentials(
+    credentials,
+    getWireModel(creditsBody),
+    getWireModel(transformedBody) ?? requestedModel
+  );
   applyAntigravityClientProfileHeaders(
     finalCreditsHeaders,
-    resolveAntigravityEffectiveCredentials(
-      credentials,
-      getRequestTargetModel(creditsBody),
-      getRequestTargetModel(transformedBody)
-    ),
+    effectiveCreditsCredentials,
     creditsBody
   );
   try {

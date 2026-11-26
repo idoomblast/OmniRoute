@@ -797,8 +797,15 @@ async function buildUnifiedModelsResponseCore(
           // A synced row may predate the disabled filter on the discovery path (the
           // cli catalog advertises `gemini-4-*-disabled` for unentitled accounts).
           // Filtering only at sync time leaves stale rows visible until something
-          // refreshes them, so reject them on read as well.
-          if (isDisabledAntigravityModelId(sm.id)) continue;
+          // refreshes them, so reject them on read as well. Scoped to Antigravity/AGY:
+          // `*-disabled` is that provider's convention, and hiding a same-named row for
+          // an unrelated provider would silently drop a legitimate model.
+          if (
+            (canonicalProviderId === "antigravity" || canonicalProviderId === "agy") &&
+            isDisabledAntigravityModelId(sm.id)
+          ) {
+            continue;
+          }
           if (canonicalProviderId === "codex" && isCodexDiscoveryModelExcluded(sm)) {
             continue;
           }

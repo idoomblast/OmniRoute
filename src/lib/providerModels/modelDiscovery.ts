@@ -6,6 +6,7 @@ import {
 } from "@/lib/db/models";
 import { CANONICAL_EFFORT_VALUES } from "@/shared/reasoning/effortStandardization";
 import { isObsoleteKiroModelAlias } from "@omniroute/open-sse/services/kiroModels.ts";
+import { isDisabledAntigravityModelId } from "@omniroute/open-sse/config/antigravityThinkingLevels.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -112,7 +113,8 @@ function parseEffortList(rawList: unknown): string[] | undefined {
         .map((entry) => {
           const entryParsed = effortEntrySchema.safeParse(entry);
           if (!entryParsed.success) return null;
-          const raw = typeof entryParsed.data === "string" ? entryParsed.data : entryParsed.data.effort;
+          const raw =
+            typeof entryParsed.data === "string" ? entryParsed.data : entryParsed.data.effort;
           return raw.length > 0 ? normalizeSupportedEffort(raw) : null;
         })
         .filter((effort): effort is string => effort !== null)
@@ -272,9 +274,16 @@ export async function getCachedDiscoveredModels(
   connectionId: string
 ): Promise<SyncedAvailableModel[]> {
   const models = await getSyncedAvailableModelsForConnection(providerId, connectionId);
-  return providerId === "kiro"
-    ? models.filter((model) => !isObsoleteKiroModelAlias(model.id))
-    : models;
+  if (providerId === "kiro") {
+    return models.filter((model) => !isObsoleteKiroModelAlias(model.id));
+  }
+  // Antigravity/AGY: a row synced before the discovery filter existed would otherwise
+  // keep showing up in the cached management response forever. The public catalog
+  // already rejects these on read; this closes the other surface that serves them.
+  if (providerId === "antigravity" || providerId === "agy") {
+    return models.filter((model) => !isDisabledAntigravityModelId(model.id));
+  }
+  return models;
 }
 
 export async function persistDiscoveredModels(

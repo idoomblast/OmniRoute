@@ -452,6 +452,43 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     const modelSource = toNonEmptyString(modelsData.source)?.toLowerCase() || "unknown";
     const modelWarning = toNonEmptyString(modelsData.warning);
+    // A discovery-degraded response carries cached rows, not a fresh import source.
+    // Importing it would regenerate managed models and overwrite the persisted MITM
+    // aliases with whatever the cached snapshot happened to contain, so bail out before
+    // any model or alias write.
+    if (modelsData.discoveryDegraded === true) {
+      const responseError =
+        modelWarning || "Remote model discovery failed; refusing to sync cached models";
+      await saveCallLog({
+        method: "GET",
+        path: `/api/providers/${id}/models`,
+        status: 502,
+        model: "model-sync",
+        provider: logProvider,
+        sourceFormat: "-",
+        connectionId: id,
+        duration,
+        error: responseError,
+        requestType: "model-sync",
+        responseBody: {
+          source: modelSource,
+          warning: modelWarning,
+          discoveryDegraded: true,
+          provider: logProvider,
+          channel: channelLabel,
+        },
+      });
+
+      return NextResponse.json(
+        {
+          error: responseError,
+          source: modelSource,
+          discoveryDegraded: true,
+          ...(modelWarning ? { warning: modelWarning } : {}),
+        },
+        { status: 502 }
+      );
+    }
     if (isDegradedLocalCatalog(modelsData)) {
       const responseError =
         modelWarning || "Remote model discovery failed; local catalog fallback not synced";
