@@ -42,14 +42,18 @@ async function resetStorage() {
   core.resetDbInstance();
 }
 
-async function seedConnection(provider: string, connectionId: string) {
+async function seedConnection(
+  provider: string,
+  connectionId: string,
+  providerSpecificData: Record<string, unknown> = {}
+) {
   await providersDb.createProviderConnection({
     provider,
     authType: "apikey",
     name: `${provider}-${connectionId}`,
     apiKey: "test-key-" + connectionId,
     isActive: true,
-    providerSpecificData: {},
+    providerSpecificData,
   } as never);
   const connections = await providersDb.getProviderConnections({ provider });
   const created = connections.find(
@@ -250,6 +254,20 @@ test("BF-1: a nested error envelope is not a catalog, at any container depth", (
     { models: { error: { code: 500 } } },
     { result: { fault: { faultstring: "nope" } } },
     { data: [], error: { code: 429, message: "quota" } },
+    // Non-empty ARRAYS of non-model values. Each has length 1, so a length-based emptiness
+    // test never fires, yet every one persists zero models — this is the shape that wiped
+    // watsonx/oci/sap after round 10.
+    { data: [{ error: { code: 429, message: "quota exceeded" } }] },
+    { data: [{ message: "quota exceeded", code: 429 }] },
+    { data: ["Service temporarily unavailable"] },
+    { data: [null] },
+    { data: [{}] },
+    { data: [42] },
+    [{ error: { code: 429 } }],
+    [{ message: "rate limited" }],
+    ["Service temporarily unavailable"],
+    { models: [{ error: { code: 500 } }] },
+    { result: [{ message: "unauthorized" }] },
   ];
   for (const body of notCatalogs) {
     assert.equal(
@@ -278,6 +296,11 @@ test("BF-1: real catalog shapes are still catalogs, including empty ones and nes
     { data: { models: [{ id: "a" }] } },
     { data: { models: {} } },
     { result: { items: [{ id: "a" }] } },
+    // One non-model element alongside a real one is still a catalog (partial junk is normal).
+    { data: [{ id: "a" }, { message: "ignored" }] },
+    // The other identity fields the repo's own normalizers accept.
+    { data: [{ model: "gpt-x" }] },
+    { data: [{ name: "Friendly Name" }] },
   ];
   for (const body of catalogs) {
     assert.equal(
@@ -402,4 +425,94 @@ test("BF-2: a genuinely empty catalog still persists (the guard is not simply re
 
   const rows = await getSyncedAvailableModelsForConnection(provider, connectionId);
   assert.equal(rows.length, 0, "an authoritative empty catalog must still clear the rows");
+});
+
+// ---------------------------------------------------------------------------
+// BF-1/BF-2 (round 10) — non-empty ARRAYS of non-model values, per parse class.
+//
+// Every fixture above is classifier-level. The reviewer's point in BF-3 was that a classifier
+// test cannot prove the ROUTE refuses these, because the route has its own length-based branch
+// (and its own loop). These drive the real handler for each parse class the repo has:
+//   - the dedicated normalizer branches (watsonx / oci / sap)
+//   - the generic `data.data || data.models` branch (glm)
+//   - the openai-compatible endpoint loop
+// ---------------------------------------------------------------------------
+
+const ARRAY_JUNK = [
+  {
+    label: "one-element error array",
+    body: { data: [{ error: { code: 429, message: "quota" } }] },
+  },
+  { label: "one-element status string array", body: { data: ["Service temporarily unavailable"] } },
+  { label: "one-element null array", body: { data: [null] } },
+];
+
+for (const provider of ["watsonx", "oci", "sap"] as const) {
+  for (const { label, body } of ARRAY_JUNK) {
+    test(`BF-1: ${provider} survives a ${label} on GET`, async () => {
+      await resetStorage();
+      const connectionId = await seedConnection(provider, `bf1a-${provider}-${label.length}`);
+      await seedCatalog(provider, connectionId);
+
+      globalThis.fetch = (async () => jsonResponse(body)) as typeof fetch;
+
+      const route = await import("../../src/app/api/providers/[id]/models/route.ts");
+      await route.GET(
+        new Request(`http://localhost/api/providers/${connectionId}/models?refresh=true`),
+        { params: Promise.resolve({ id: connectionId }) }
+      );
+
+      const rows = await getSyncedAvailableModelsForConnection(provider, connectionId);
+      assert.equal(rows.length, 2, `${provider} catalog must survive: ${label}`);
+    });
+  }
+}
+
+test("BF-2: glm survives a one-element error array on GET", async () => {
+  await resetStorage();
+  const connectionId = await seedConnection("glm", "bf2-array-glm");
+  await seedCatalog("glm", connectionId);
+
+  globalThis.fetch = (async () =>
+    jsonResponse({ data: [{ error: { code: 429, message: "quota" } }] })) as typeof fetch;
+
+  const route = await import("../../src/app/api/providers/[id]/models/route.ts");
+  await route.GET(
+    new Request(`http://localhost/api/providers/${connectionId}/models?refresh=true`),
+    { params: Promise.resolve({ id: connectionId }) }
+  );
+
+  const rows = await getSyncedAvailableModelsForConnection("glm", connectionId);
+  assert.equal(rows.length, 2, "glm catalog must survive a non-model array");
+});
+
+test("BF-2: the openai-compatible endpoint loop does not break on a non-model array", async () => {
+  await resetStorage();
+  const provider = "openai-compatible-test";
+  // A baseUrl is REQUIRED to reach the endpoint loop at all: without it the route answers
+  // "No base URL configured" and the loop never runs, which made the first version of this
+  // test pass for the wrong reason.
+  const connectionId = await seedConnection(provider, "bf2-loop", {
+    baseUrl: "https://loop-test.invalid/v1",
+    autoFetchModels: true,
+  });
+  await seedCatalog(provider, connectionId);
+  let probed = 0;
+
+  // The loop treats a `break` as "this endpoint answered authoritatively". A one-element
+  // non-model array must not count as an answer.
+  globalThis.fetch = (async () => {
+    probed++;
+    return jsonResponse({ data: [{ error: { code: 429, message: "quota" } }] });
+  }) as typeof fetch;
+
+  const route = await import("../../src/app/api/providers/[id]/models/route.ts");
+  await route.GET(
+    new Request(`http://localhost/api/providers/${connectionId}/models?refresh=true`),
+    { params: Promise.resolve({ id: connectionId }) }
+  );
+
+  const rows = await getSyncedAvailableModelsForConnection(provider, connectionId);
+  assert.ok(probed > 0, "the test must actually reach the endpoint loop");
+  assert.equal(rows.length, 2, "endpoint loop must not accept a non-model array as success");
 });

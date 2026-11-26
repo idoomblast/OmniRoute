@@ -71,13 +71,21 @@ const CATALOG_CONTAINER_KEYS = [
 const ERROR_ENVELOPE_KEYS = ["error", "errors", "fault", "detail"] as const;
 
 /**
- * Whether a value is a model entry — an object something model-shaped, i.e. it carries a
- * string `id` (or `name`, which a few catalogs use as the identity).
+ * Whether a value is a model entry.
+ *
+ * The identity fields are exactly the ones `normalizeDiscoveredModels` reads
+ * (`id` || `name` || `model`) — anything else would be dropped on write, so an array of such
+ * values persists ZERO models no matter how long it is. Keeping the two definitions in step is
+ * what makes "is this a catalog" mean "would this persist anything".
  */
 function looksLikeModelEntry(value: unknown): boolean {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const entry = value as Record<string, unknown>;
-  return typeof entry.id === "string" || typeof entry.name === "string";
+  for (const field of ["id", "name", "model"] as const) {
+    const raw = entry[field];
+    if (typeof raw === "string" && raw.trim().length > 0) return true;
+  }
+  return false;
 }
 
 /**
@@ -96,7 +104,15 @@ function looksLikeModelEntry(value: unknown): boolean {
  * a catalog and must not be read as an empty one.
  */
 function isCatalogContainerValue(value: unknown, key: string, depth = 0): boolean {
-  if (Array.isArray(value)) return true;
+  if (Array.isArray(value)) {
+    // An EMPTY array is a real answer (the account has nothing).
+    if (value.length === 0) return true;
+    // A non-empty array is a catalog only if at least one element is model-shaped. Length is
+    // not evidence: `[{error:{code:429}}]`, `["Service temporarily unavailable"]` and `[null]`
+    // are all length 1, and every one of them persists zero models while the route's
+    // `models.length === 0` test stays false — wiping the stored catalog behind a 200.
+    return value.some((entry) => looksLikeModelEntry(entry));
+  }
   if (typeof value !== "object" || value === null) return false;
   // A nested error envelope is not a catalog, whatever container it hides in.
   if (hasErrorEnvelopeDeep(value)) return false;
@@ -151,8 +167,13 @@ function hasErrorEnvelopeDeep(payload: unknown): boolean {
  * Both read as empty catalogs and wiped healthy ones. Presence of a key is not evidence.
  */
 export function hasCatalogCollection(payload: unknown): boolean {
-  // A bare array is the whole catalog (AI/ML API answers with a top-level list).
-  if (Array.isArray(payload)) return true;
+  // A bare array is the whole catalog (AI/ML API answers with a top-level list) — but only
+  // when it actually holds model entries. `[{"error":{"code":429}}]` is a top-level error
+  // array, not an empty account.
+  if (Array.isArray(payload)) {
+    if (payload.length === 0) return true;
+    return payload.some((entry) => looksLikeModelEntry(entry));
+  }
   const record = asRecord(payload);
   // An error envelope at the top level is never a catalog, even when a container key is also
   // present (`{"data": [], "error": {...}}` answers an error, not an empty account).

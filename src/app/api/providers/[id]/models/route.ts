@@ -81,6 +81,7 @@ import {
 import {
   getCachedDiscoveredModels,
   isAutoFetchModelsEnabled,
+  normalizeDiscoveredModels,
   persistDiscoveredModels,
 } from "@/lib/providerModels/modelDiscovery";
 import { buildProviderModelsUrl, getDiscoveryClientVersionOptions } from "./discoveryClientVersion";
@@ -502,7 +503,16 @@ export async function GET(
         sourcePayload !== undefined &&
         !hasErrorEnvelope(sourcePayload) &&
         hasCatalogCollection(sourcePayload);
-      if (!isModelList || (models.length === 0 && !authoritativeEmpty && !payloadProvesCatalog)) {
+      // Count what would actually PERSIST, not what was handed in. `[{error:{...}}]` and
+      // `["Service unavailable"]` are length 1 but normalize to zero models; using the raw
+      // length skipped this guard and let `persistDiscoveredModels` delete every row behind a
+      // 200. `normalizeDiscoveredModels` is the same function the write path uses, so this is
+      // the only count that answers "will this wipe the catalog".
+      const persistableCount = isModelList ? normalizeDiscoveredModels(models).length : 0;
+      if (
+        !isModelList ||
+        (persistableCount === 0 && !authoritativeEmpty && !payloadProvesCatalog)
+      ) {
         const fallback = buildDiscoveryFallbackResponse({
           cacheWarning: "Upstream returned no catalog — using cached catalog",
           localWarning: "Upstream returned no catalog — using local catalog",
@@ -934,9 +944,11 @@ export async function GET(
                   ? data.models
                   : [];
             // A 200 carrying an error envelope is not an empty catalog. Accepting it would
-            // break the endpoint loop and persist a wipe behind a success status.
+            // break the endpoint loop and persist a wipe behind a success status. The decision
+            // uses the PERSISTABLE count: `[{error:{...}}]` is length 1 and still persists
+            // nothing, so a raw `.length === 0` test let it break the loop as "success".
             if (
-              payloadModels.length === 0 &&
+              normalizeDiscoveredModels(payloadModels).length === 0 &&
               (hasErrorEnvelope(data) || !hasCatalogCollection(data))
             ) {
               console.warn(
@@ -1000,6 +1012,9 @@ export async function GET(
           warning: "API unavailable — using local catalog",
         });
       }
+      // The loop only breaks on a VALIDATED catalog answer (an endpoint that failed the
+      // persistable-count test `continue`s), so reaching here means upstream answered and the
+      // result — including an empty one — is authoritative.
       return buildApiDiscoveryResponse(models, undefined, { authoritativeEmpty: true });
     }
 
