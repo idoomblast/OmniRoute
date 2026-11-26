@@ -260,19 +260,50 @@ test("BF-2: an authoritative empty sweep reports zero models and the rows it rem
 // NB-4 — every rate key participates in the partial-override merge.
 // ---------------------------------------------------------------------------
 
-test("NB-4: a partial override inherits long_context from the row it overrides", async () => {
+test("NB-4: a partial override inherits the object-valued long_context tier", async () => {
   await resetStorage();
   const { updatePricing, getPricingForModel } =
     await import("../../src/lib/db/settings/pricing.ts");
+  const { computeCostFromPricing } = await import("../../src/lib/usage/costCalculator.ts");
 
+  // The tier is an OBJECT — `{threshold, input, output, ...}` — because that is the shape
+  // `applyLongContextTier` reads. An earlier version of this test seeded `long_context: 9`
+  // (a number), a shape the calculator ignores entirely, so it asserted a form that never
+  // occurs and could never fail.
+  const TIER = {
+    threshold: 100_000,
+    input: 0.5,
+    output: 2.5,
+    cached: 0.05,
+    reasoning: 2.5,
+    cache_creation: 0.625,
+  };
   await updatePricing({
-    ag: { "gemini-4-hydrogen": { input: 1, output: 2, long_context: 9 } },
+    ag: {
+      "gemini-4-hydrogen": {
+        input: 0.1,
+        output: 0.5,
+        cached: 0.01,
+        reasoning: 0.5,
+        cache_creation: 0.125,
+        long_context: TIER,
+      },
+    },
     antigravity: { "gemini-4-hydrogen": { input: 5 } },
   } as never);
 
   const row = await getPricingForModel("antigravity", "gemini-4-hydrogen");
   assert.ok(row);
   assert.equal(row.input, 5, "the explicit rate wins");
-  assert.equal(row.output, 2, "omitted output inherits");
-  assert.equal(row.long_context, 9, "omitted long_context inherits, so long calls are not flat");
+  assert.equal(row.output, 0.5, "omitted output inherits");
+  assert.deepEqual(row.long_context, TIER, "the whole tier object inherits");
+
+  // And the inherited tier must actually change the bill: 150k input crosses the 100k
+  // threshold, so the tier's $0.50/MTok applies to the whole request ($0.075), not the
+  // flat $5/MTok explicitly overridden above.
+  const cost = computeCostFromPricing(row as Record<string, unknown>, { input: 150_000 });
+  assert.ok(
+    Math.abs(cost - 0.075) < 1e-9,
+    `long-context tier must be billed, got ${cost} (flat rate would be 0.75)`
+  );
 });

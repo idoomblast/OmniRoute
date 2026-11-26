@@ -19,7 +19,10 @@ import {
   getClientVisibleAgyModelName,
   isDiscoverableAgyModelId,
 } from "@omniroute/open-sse/config/agyModels.ts";
-import { normalizeAntigravityClientProfile } from "@/shared/constants/antigravityClientProfile";
+import {
+  type AntigravityClientProfile,
+  normalizeAntigravityClientProfile,
+} from "@/shared/constants/antigravityClientProfile";
 import { ensureAntigravityProjectAssigned } from "@omniroute/open-sse/services/antigravityProjectBootstrap.ts";
 import { persistDiscoveredAntigravityProjectId } from "@omniroute/open-sse/services/antigravityProjectPersist.ts";
 import { asRecord, toNonEmptyString } from "./helpers";
@@ -47,36 +50,61 @@ export type AntigravityDiscoveryResult = {
 };
 
 /**
- * Whether a catalog payload actually carries a models collection, under `data` or `models`.
+ * Top-level keys under which this repo's discovery parsers find a catalog. Verified against
+ * the parse sites (`grep -rnoE "\.(data|models|result|...)"`), not guessed: `data` (93
+ * sites), `models` (56), `results` (15), `result` (11), `availableModels` (4), `items` (2).
+ */
+const CATALOG_CONTAINER_KEYS = [
+  "data",
+  "models",
+  "result",
+  "results",
+  "availableModels",
+  "items",
+] as const;
+
+/**
+ * Top-level keys that carry an error instead of a catalog, across the API dialects these
+ * providers speak: REST (`{"error": ...}`), Google/GCP (`{"fault": ...}`), FastAPI
+ * (`{"detail": ...}`), and the plural REST form (`{"errors": [...]}`).
+ */
+const ERROR_ENVELOPE_KEYS = ["error", "errors", "fault", "detail"] as const;
+
+/**
+ * Whether a catalog payload actually carries a models collection.
  *
- * The generic discovery parsers read `data.data || data.models || []`, so a 200 carrying an
- * error envelope parses to the same `[]` as an account that genuinely has nothing. Callers
- * use this to SKIP such an endpoint instead of answering "the account has nothing" — that
+ * Callers use this to SKIP an endpoint instead of answering "the account has nothing" — that
  * answer clears the stored catalog behind a 200 with no call log.
+ *
+ * The test is POSITIVE: a known catalog container must be present. An earlier version accepted
+ * "any top-level array or object", which read error envelopes as catalogs — `{"errors":[...]}`,
+ * `{"fault":{...}}` and `{"message":...,"code":...}` all parsed to `[]` and wiped a healthy
+ * catalog on a 200 (round-7 BF-2). A container that is present but empty IS a real answer
+ * (the account has nothing), so emptiness is accepted as long as the key is one of ours.
  */
 export function hasCatalogCollection(payload: unknown): boolean {
   // A bare array is the whole catalog (AI/ML API answers with a top-level list).
   if (Array.isArray(payload)) return true;
   const record = asRecord(payload);
-  // Do NOT guess the container's key. Each provider's parser owns its own shape —
-  // `data`, `models`, Cloudflare's `result`, and others — so any top-level array or
-  // object value is a collection this payload carried. An empty one is still a real
-  // answer (the account has nothing). Only a body whose every value is a scalar (e.g.
-  // `{"object":"list"}`) proves nothing and must not be read as an empty catalog.
-  return Object.values(record).some(
-    (value) => Array.isArray(value) || (typeof value === "object" && value !== null)
-  );
+  return CATALOG_CONTAINER_KEYS.some((key) => {
+    if (!(key in record)) return false;
+    const value = record[key];
+    return Array.isArray(value) || (typeof value === "object" && value !== null);
+  });
 }
 
 /**
  * Whether a payload carries an error envelope instead of a catalog. Providers answer 200
- * with `{"error": {...}}` often enough that a parser reading `data.data || data.models ||
- * []` turns it into an empty catalog; callers check this before acting on that emptiness.
+ * with an error often enough that a parser reading `data.data || data.models || []` turns it
+ * into an empty catalog; callers check this before acting on that emptiness.
  */
 export function hasErrorEnvelope(payload: unknown): boolean {
-  const error = asRecord(payload).error;
-  if (typeof error === "string") return error.trim().length > 0;
-  return typeof error === "object" && error !== null;
+  const record = asRecord(payload);
+  return ERROR_ENVELOPE_KEYS.some((key) => {
+    const value = record[key];
+    if (typeof value === "string") return value.trim().length > 0;
+    return typeof value === "object" && value !== null;
+  });
 }
 
 /**

@@ -475,8 +475,33 @@ export async function GET(
     const buildApiDiscoveryResponse = async (
       models: any[],
       warning?: string,
-      extraPayload: Record<string, unknown> = {}
+      extraPayload: Record<string, unknown> = {},
+      sourcePayload?: unknown
     ) => {
+      // Structural guard: a provider that answers 200 with an error envelope (or any body that
+      // is not a catalog) must never clear the stored catalog. The check lives HERE, not at each
+      // call site, because six sites had already been written without it and each one wiped a
+      // healthy catalog behind `200 {ok:true}`. Sites parsing a raw response pass it as
+      // `sourcePayload`; sites whose models come from an already-validated helper pass nothing.
+      const payloadIsNotCatalog =
+        sourcePayload !== undefined &&
+        (hasErrorEnvelope(sourcePayload) || !hasCatalogCollection(sourcePayload));
+      if (models.length === 0 && payloadIsNotCatalog) {
+        const fallback = buildDiscoveryFallbackResponse({
+          cacheWarning: "Upstream returned no catalog — using cached catalog",
+          localWarning: "Upstream returned no catalog — using local catalog",
+        });
+        if (fallback) return fallback;
+        return buildResponse({
+          provider,
+          connectionId,
+          models: [],
+          source: "api",
+          importable: false,
+          ...(warning ? { warning } : {}),
+          ...extraPayload,
+        });
+      }
       if (!persistDiscovery) {
         // Probe mode: report the sweep as-is, write nothing. The caller (model-sync)
         // persists only after it has accepted the result. No specialty merge here: sync
@@ -1022,12 +1047,16 @@ export async function GET(
         );
       }
 
-      const models = normalizeDataRobotCatalogResponse(await response.json());
+      const dataRobotPayload = await response.json();
+      const models = normalizeDataRobotCatalogResponse(dataRobotPayload);
       return buildApiDiscoveryResponse(
         models.map((model) => ({
           ...model,
           owned_by: "datarobot",
-        }))
+        })),
+        undefined,
+        {},
+        dataRobotPayload
       );
     }
 
@@ -1092,9 +1121,10 @@ export async function GET(
         }
 
         if (response.ok) {
-          const normalized = normalizeAzureModelsResponse(await response.json(), "azure-ai");
+          const azureAiPayload = await response.json();
+          const normalized = normalizeAzureModelsResponse(azureAiPayload, "azure-ai");
           if (normalized.length > 0) {
-            return buildApiDiscoveryResponse(normalized);
+            return buildApiDiscoveryResponse(normalized, undefined, {}, azureAiPayload);
           }
         }
 
@@ -1172,8 +1202,12 @@ export async function GET(
         }
 
         if (response.ok) {
+          const azureOpenAiPayload = await response.json();
           return buildApiDiscoveryResponse(
-            normalizeOpenAiLikeModelsResponse(await response.json(), "azure-openai")
+            normalizeOpenAiLikeModelsResponse(azureOpenAiPayload, "azure-openai"),
+            undefined,
+            {},
+            azureOpenAiPayload
           );
         }
 
@@ -1248,8 +1282,12 @@ export async function GET(
         );
       }
 
+      const watsonxPayload = await response.json();
       return buildApiDiscoveryResponse(
-        normalizeOpenAiLikeModelsResponse(await response.json(), "watsonx")
+        normalizeOpenAiLikeModelsResponse(watsonxPayload, "watsonx"),
+        undefined,
+        {},
+        watsonxPayload
       );
     }
 
@@ -1314,8 +1352,12 @@ export async function GET(
         );
       }
 
+      const ociPayload = await response.json();
       return buildApiDiscoveryResponse(
-        normalizeOpenAiLikeModelsResponse(await response.json(), "oci")
+        normalizeOpenAiLikeModelsResponse(ociPayload, "oci"),
+        undefined,
+        {},
+        ociPayload
       );
     }
 
@@ -1379,7 +1421,13 @@ export async function GET(
         );
       }
 
-      return buildApiDiscoveryResponse(normalizeSapModelsResponse(await response.json()));
+      const sapPayload = await response.json();
+      return buildApiDiscoveryResponse(
+        normalizeSapModelsResponse(sapPayload),
+        undefined,
+        {},
+        sapPayload
+      );
     }
 
     if (provider === "claude") {
@@ -1507,10 +1555,10 @@ export async function GET(
           name: String(m.name || m.llm_model),
         }));
 
-        return buildApiDiscoveryResponse(models);
+        return buildApiDiscoveryResponse(models, undefined, {}, modelsBody);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        const fallback = buildDiscoveryFallbackResponse({
+        const fallback = buildDiscoveryErrorFallbackResponse(err, {
           cacheWarning: `Inner.ai models unavailable (${message}) — using cached catalog`,
           localWarning: `Inner.ai models unavailable (${message}) — using local catalog`,
         });
@@ -1940,6 +1988,20 @@ export async function GET(
           }
 
           const data = await response.json();
+          // A 200 carrying an error envelope (GCP answers `{"fault": ...}`) parses to zero
+          // models; concatenating it would let the loop finish "successfully" with an empty
+          // catalog and clear the stored rows. Stop and let the caller fall back instead.
+          if (hasErrorEnvelope(data) || !hasCatalogCollection(data)) {
+            console.warn(
+              `[models] ${provider}: 200 without a catalog collection — not treating it as empty`
+            );
+            const fallback = buildDiscoveryFallbackResponse();
+            if (fallback) return fallback;
+            return NextResponse.json(
+              { error: "Provider returned no model catalog" },
+              { status: 502 }
+            );
+          }
           allModels.push(...parseGeminiModelsList(data));
 
           const nextPageToken = data.nextPageToken;

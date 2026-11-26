@@ -134,17 +134,16 @@ export async function getPricingWithSources(): Promise<{
 export async function getPricingForModel(provider: string, model: string) {
   const pricing = await getPricing();
 
-  // Every rate a row can carry. A partial override inherits whichever ones it omits from
-  // the fallback row; leaving `long_context` behind would silently bill the flat rate for
-  // a model that prices long-context calls separately.
-  const RATE_KEYS = [
-    "input",
-    "output",
-    "cached",
-    "reasoning",
-    "cache_creation",
-    "long_context",
-  ] as const;
+  // Scalar rates a row can carry. A partial override inherits whichever ones it omits from
+  // the fallback row; leaving `output` undefined makes the calculator bill 0 for output
+  // tokens instead of the default rate.
+  const SCALAR_RATE_KEYS = ["input", "output", "cached", "reasoning", "cache_creation"] as const;
+
+  // Rates that are a whole TIER object rather than a number. `long_context` is
+  // `{threshold, input, output, cached, reasoning, cache_creation}` and `costCalculator`'s
+  // `applyLongContextTier` reads it as an object — a numeric `long_context` is ignored
+  // entirely, so it must be inherited as an opaque value, never compared as a number.
+  const OBJECT_RATE_KEYS = ["long_context"] as const;
 
   /**
    * Fill rates a row omits from a more complete fallback row. A user override that only
@@ -153,10 +152,19 @@ export async function getPricingForModel(provider: string, model: string) {
    */
   const mergeMissingRates = (row: JsonRecord, fallback: JsonRecord): JsonRecord => {
     const merged: JsonRecord = { ...row };
-    for (const key of RATE_KEYS) {
+    for (const key of SCALAR_RATE_KEYS) {
       if (typeof merged[key] === "number" && Number.isFinite(merged[key] as number)) continue;
       if (typeof fallback[key] === "number" && Number.isFinite(fallback[key] as number)) {
         merged[key] = fallback[key];
+      }
+    }
+    for (const key of OBJECT_RATE_KEYS) {
+      // Present at all (even as a malformed tier the calculator will ignore) counts as
+      // the row having an opinion; only a genuinely absent key is inherited.
+      if (merged[key] !== undefined && merged[key] !== null) continue;
+      const tier = fallback[key];
+      if (typeof tier === "object" && tier !== null && !Array.isArray(tier)) {
+        merged[key] = tier;
       }
     }
     return merged;
@@ -182,11 +190,17 @@ export async function getPricingForModel(provider: string, model: string) {
   // is not enough — the MODEL has to be looked up in each candidate namespace.
   const candidateNamespaces: string[] = [pLower];
 
-  if (!providerPricing) {
+  // The alias is ALWAYS a candidate namespace, whether or not the provider also has its own
+  // table. A full table under the provider id does not make the alias table irrelevant: a
+  // partial override stored under the provider id inherits its unset rates from the alias
+  // table, and only a candidate namespace can supply them. Pushing it conditionally dropped
+  // `input`/`cached`/`reasoning`/`cache_creation`/`long_context` for every partial override on
+  // a provider whose alias owns the real prices (`claude` → `cc`).
+  {
     const alias = findKeyInsensitive<string>(PROVIDER_ID_TO_ALIAS, pLower);
-    if (alias) {
-      providerPricing = findKeyInsensitive(pricing, alias);
-      if (alias !== pLower) candidateNamespaces.push(alias.toLowerCase());
+    if (alias && alias.toLowerCase() !== pLower) {
+      candidateNamespaces.push(alias.toLowerCase());
+      if (!providerPricing) providerPricing = findKeyInsensitive(pricing, alias);
     }
   }
 
