@@ -221,75 +221,185 @@ test("BF-4: a partial override on a provider whose alias owns the prices keeps e
 });
 
 // ---------------------------------------------------------------------------
-// BF-1 (round 8) — the guard must be SAFE BY DEFAULT, not opt-in.
+// BF-1/BF-2/BF-3 (round 9) — the guard must be CONTENT-aware and BEHAVIOURALLY tested.
 //
-// The round-7 fix threaded a `sourcePayload` through seven sites and left fifteen without one.
-// Because the guard only refused when a payload was supplied AND looked like an error, those
-// fifteen still wiped the catalog on `models.length === 0`. A guard whose protection depends on
-// each call site opting in is not a guard: it is a checklist, and the checklist was already
-// wrong once.
+// Round 9 found the guard still bypassable:
+//   - `{"data":{"error":{"code":429}}}` passed, because `hasCatalogCollection` accepted any
+//     object under a container key. An error envelope wrapped one level down is still an error.
+//   - `{"data":"Service temporarily unavailable"}` passed, because a STRING has a truthy
+//     `.length`, so `models.length === 0` was false while `normalizeDiscoveredModels` coerced
+//     it to `[]` downstream and deleted the rows.
+//   - the "structural" test that was supposed to prevent all this only matched the NAME of the
+//     last argument, so it certified unprotected sites. A test that checks a token cannot
+//     evidence a property.
 //
-// This test reads the source and fails if a call site can reach the helper with an empty list
-// and no stated reason — so adding a site now requires either passing the raw body or writing
-// `authoritativeEmpty: true` with a justification.
+// These assert BEHAVIOUR: what the classifier decides, and what the real route does to the
+// database, for every shape that has ever wiped a catalog.
 // ---------------------------------------------------------------------------
 
-test("BF-1 structural: every call site either proves a catalog or declares itself authoritative", async () => {
-  const fs = await import("node:fs");
-  const path = await import("node:path");
-  const file = path.join(process.cwd(), "src/app/api/providers/[id]/models/route.ts");
-  const lines = fs.readFileSync(file, "utf8").split("\n");
-
-  function callText(start: number): string {
-    let depth = 0;
-    const buf: string[] = [];
-    for (let j = start; j < lines.length; j++) {
-      buf.push(lines[j]);
-      depth += (lines[j].match(/\(/g) || []).length - (lines[j].match(/\)/g) || []).length;
-      if (depth <= 0) break;
-    }
-    return buf.join("\n");
+test("BF-1: a nested error envelope is not a catalog, at any container depth", () => {
+  const notCatalogs = [
+    { data: { error: { code: 429, message: "quota exceeded" } } },
+    { data: { errors: [{ status: "429", detail: "quota" }] } },
+    { data: { fault: { faultstring: "Invalid ApiKey" } } },
+    { data: { detail: "Not authenticated" } },
+    { data: "Service temporarily unavailable" },
+    { data: 503 },
+    { data: {} },
+    { data: null },
+    { models: { error: { code: 500 } } },
+    { result: { fault: { faultstring: "nope" } } },
+    { data: [], error: { code: 429, message: "quota" } },
+  ];
+  for (const body of notCatalogs) {
+    assert.equal(
+      hasCatalogCollection(body),
+      false,
+      `must not read as a catalog: ${JSON.stringify(body)}`
+    );
   }
+});
 
-  const silent: string[] = [];
-  let sites = 0;
-  for (let i = 0; i < lines.length; i++) {
-    if (!lines[i].includes("buildApiDiscoveryResponse(")) continue;
-    if (lines[i].includes("const buildApiDiscoveryResponse")) continue;
-    sites++;
-
-    const text = callText(i);
-    // A stated reason: the raw body is passed as proof, or the caller declares the empty list
-    // authoritative (directly, or via a meta object it builds just above).
-    // The proof is the LAST argument: the raw body, under any name that reads like one.
-    const args = text.slice(text.indexOf("(") + 1, text.lastIndexOf(")"));
-    const lastArg = args.split(",").pop()?.trim() || "";
-    // Exact match on the final segment of a property path (`discovery.foundationModelsResponse`
-    // counts, `rawMetadata` does not — a loose suffix match would let any variable ending in
-    // "data" masquerade as proof).
-    const lastSegment = lastArg.split(".").pop() || "";
-    const namesProof =
-      lastSegment === "data" ||
-      lastSegment === "modelsBody" ||
-      lastSegment === "foundationModelsResponse" ||
-      /[Pp]ayload$/.test(lastSegment);
-    const declares =
-      text.includes("authoritativeEmpty") ||
-      /return buildApiDiscoveryResponse\(persisted, warning, discoveryMeta\)/.test(text);
-
-    // A branch that cannot reach the helper with an empty list needs no proof.
-    const pre = lines.slice(Math.max(0, i - 6), i).join("\n");
-    const lengthGated = /\.length\s*>\s*0\s*\)/.test(pre);
-
-    if (!namesProof && !declares && !lengthGated) {
-      silent.push(`line ${i + 1}: ${lines[i].trim()}`);
-    }
+test("BF-1: real catalog shapes are still catalogs, including empty ones and nested envelopes", () => {
+  const catalogs = [
+    [{ id: "a" }],
+    { data: [{ id: "a" }] },
+    { data: [] },
+    { models: {} },
+    { models: { a: { id: "a", name: "A" } } },
+    { result: [{ id: "a" }] },
+    { results: [{ id: "a" }] },
+    { availableModels: [{ id: "a" }] },
+    { items: [{ id: "a" }] },
+    // Real providers wrap the catalog one envelope deeper and that is still a catalog:
+    // zai-web answers `{data:{data:[...]}}` and qwen-web `{data:{models:[...]}}`. A guard that
+    // only looks at the top container rejects both and serves local_catalog instead.
+    { data: { data: [{ id: "a" }] } },
+    { data: { models: [{ id: "a" }] } },
+    { data: { models: {} } },
+    { result: { items: [{ id: "a" }] } },
+  ];
+  for (const body of catalogs) {
+    assert.equal(
+      hasCatalogCollection(body),
+      true,
+      `must read as a catalog: ${JSON.stringify(body)}`
+    );
   }
+});
 
-  assert.ok(sites >= 20, `expected the known set of call sites, found ${sites}`);
-  assert.deepEqual(
-    silent,
-    [],
-    `call sites with no stated reason for an empty result:\n${silent.join("\n")}`
+for (const provider of WIPE_PROVIDERS) {
+  test(`BF-1: ${provider} survives a nested error envelope on GET`, async () => {
+    await resetStorage();
+    const connectionId = await seedConnection(provider, `bf1n-${provider}`);
+    await seedCatalog(provider, connectionId);
+
+    globalThis.fetch = (async () =>
+      jsonResponse({
+        data: { error: { code: 429, message: "quota exceeded" } },
+      })) as typeof fetch;
+
+    const route = await import("../../src/app/api/providers/[id]/models/route.ts");
+    await route.GET(
+      new Request(`http://localhost/api/providers/${connectionId}/models?refresh=true`),
+      { params: Promise.resolve({ id: connectionId }) }
+    );
+
+    const rows = await getSyncedAvailableModelsForConnection(provider, connectionId);
+    assert.equal(rows.length, 2, `${provider} catalog must survive a nested error envelope`);
+  });
+}
+
+// The scalar-container defect lives in the GENERIC parser branches (`data.data || data.models`),
+// which `glm*` and the anthropic-compatible families use. Testing it against a provider that
+// goes through its own dedicated parser proves nothing — the first version of this test did
+// exactly that and stayed green with the fix reverted.
+const GENERIC_PARSE_PROVIDERS = ["glm", "anthropic-compatible-fireworks"] as const;
+
+for (const provider of GENERIC_PARSE_PROVIDERS) {
+  test(`BF-2: ${provider} survives a scalar under the container key on GET`, async () => {
+    await resetStorage();
+    const connectionId = await seedConnection(provider, `bf2-${provider}`);
+    await seedCatalog(provider, connectionId);
+
+    // A very common degraded-upstream shape. `"text".length` is truthy, so a length-based
+    // guard sails past it and the non-array is coerced to [] downstream.
+    globalThis.fetch = (async () =>
+      jsonResponse({ data: "Service temporarily unavailable" })) as typeof fetch;
+
+    const route = await import("../../src/app/api/providers/[id]/models/route.ts");
+    await route.GET(
+      new Request(`http://localhost/api/providers/${connectionId}/models?refresh=true`),
+      { params: Promise.resolve({ id: connectionId }) }
+    );
+
+    const rows = await getSyncedAvailableModelsForConnection(provider, connectionId);
+    assert.equal(rows.length, 2, `${provider} catalog must survive a scalar container`);
+  });
+}
+
+test("BF-2: a non-array never counts as a model list at the classifier level", () => {
+  // The guard must not rely on `.length`: a string, a number and an object all have lengths or
+  // are truthy, and all get coerced to [] downstream.
+  for (const body of [
+    { data: "Service temporarily unavailable" },
+    { data: 503 },
+    { models: { error: { code: 429 } } },
+  ]) {
+    assert.equal(hasCatalogCollection(body), false, JSON.stringify(body));
+  }
+});
+
+test("BF-1/BF-2: POST /sync-models refuses both shapes and keeps the rows", async () => {
+  for (const body of [
+    { data: { error: { code: 429, message: "quota" } } },
+    { data: "Service temporarily unavailable" },
+  ]) {
+    await resetStorage();
+    const provider = "glm";
+    const connectionId = await seedConnection(provider, `bf12-sync-${Math.random()}`);
+    await seedCatalog(provider, connectionId);
+
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/providers/") && url.includes("/models?")) {
+        const parsed = new URL(url);
+        return providersRoute.GET(
+          new Request(`http://localhost${parsed.pathname}${parsed.search}`),
+          { params: Promise.resolve({ id: parsed.pathname.split("/")[3] }) }
+        );
+      }
+      if (url.includes("__readiness")) return new Response(null, { status: 404 });
+      return jsonResponse(body);
+    }) as typeof fetch;
+
+    const res = await syncRoute.POST(
+      new Request(`http://localhost/api/providers/${connectionId}/sync-models`, {
+        method: "POST",
+      }),
+      { params: Promise.resolve({ id: connectionId }) }
+    );
+    const rows = await getSyncedAvailableModelsForConnection(provider, connectionId);
+    assert.equal(rows.length, 2, `catalog must survive ${JSON.stringify(body)}`);
+    assert.notEqual(res.status, 200, "a sync built on a non-catalog must not report success");
+  }
+});
+
+test("BF-2: a genuinely empty catalog still persists (the guard is not simply refusing everything)", async () => {
+  await resetStorage();
+  const provider = "glm";
+  const connectionId = await seedConnection(provider, "bf2-empty-legit");
+  await seedCatalog(provider, connectionId);
+
+  // A real, authoritative empty answer: an array under the container, zero entries.
+  globalThis.fetch = (async () => jsonResponse({ data: [] })) as typeof fetch;
+
+  const route = await import("../../src/app/api/providers/[id]/models/route.ts");
+  await route.GET(
+    new Request(`http://localhost/api/providers/${connectionId}/models?refresh=true`),
+    { params: Promise.resolve({ id: connectionId }) }
   );
+
+  const rows = await getSyncedAvailableModelsForConnection(provider, connectionId);
+  assert.equal(rows.length, 0, "an authoritative empty catalog must still clear the rows");
 });

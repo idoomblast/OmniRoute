@@ -156,9 +156,12 @@ async function fetchLiveNoAuthModels(
     if (!liveResponse.ok) return null;
 
     const data = await liveResponse.json();
-    const liveModels: Array<{ id: string; name: string }> = (
-      (data.data || data.models || []) as Array<Record<string, unknown>>
-    )
+    const liveModelRows = Array.isArray(data.data)
+      ? data.data
+      : Array.isArray(data.models)
+        ? data.models
+        : [];
+    const liveModels: Array<{ id: string; name: string }> = liveModelRows
       .map(toLiveModel)
       .filter((model): model is { id: string; name: string } => model !== null);
     if (liveModels.length === 0) return null;
@@ -488,12 +491,18 @@ export async function GET(
       // so `models.length === 0` still wiped the catalog there. A call site can now only lose that
       // protection by explicitly passing `authoritativeEmpty: true`, which is a deliberate,
       // greppable act rather than an omission.
+      // A non-array is never a catalog: `data.data || data.models || []` yields a STRING when
+      // upstream answers `{"data":"Service temporarily unavailable"}`, and `"text".length` is
+      // truthy — so a `.length === 0` test sails past it while `normalizeDiscoveredModels`
+      // coerces it to `[]` downstream and deletes the rows. Refuse it here, before anything
+      // looks at a length.
+      const isModelList = Array.isArray(models);
       const authoritativeEmpty = extraPayload.authoritativeEmpty === true;
       const payloadProvesCatalog =
         sourcePayload !== undefined &&
         !hasErrorEnvelope(sourcePayload) &&
         hasCatalogCollection(sourcePayload);
-      if (models.length === 0 && !authoritativeEmpty && !payloadProvesCatalog) {
+      if (!isModelList || (models.length === 0 && !authoritativeEmpty && !payloadProvesCatalog)) {
         const fallback = buildDiscoveryFallbackResponse({
           cacheWarning: "Upstream returned no catalog — using cached catalog",
           localWarning: "Upstream returned no catalog — using local catalog",
@@ -919,7 +928,11 @@ export async function GET(
             const data = await response.json();
             const payloadModels = isNamedOpenAIStyleProvider(provider)
               ? normalizeOpenAiLikeModelsResponse(data, provider)
-              : data.data || data.models || [];
+              : Array.isArray(data.data)
+                ? data.data
+                : Array.isArray(data.models)
+                  ? data.models
+                  : [];
             // A 200 carrying an error envelope is not an empty catalog. Accepting it would
             // break the endpoint loop and persist a wipe behind a success status.
             if (
@@ -1667,7 +1680,14 @@ export async function GET(
       }
 
       const data = await response.json();
-      const models = data.data || data.models || [];
+      // Only an ARRAY container is a model list. `data.data` can be a status string on a
+      // degraded 200, and a string has a truthy `.length`, which would slip past the
+      // empty-catalog guard and be coerced to `[]` downstream.
+      const models = Array.isArray(data.data)
+        ? data.data
+        : Array.isArray(data.models)
+          ? data.models
+          : [];
       // Pass the raw body so the helper can tell "upstream answered with an empty catalog"
       // from "upstream answered with something that is not a catalog". The helper owns the
       // decision; a second inline copy of the rule is how the sites drifted apart before.
@@ -2132,7 +2152,14 @@ export async function GET(
       }
 
       const data = await response.json();
-      const models = data.data || data.models || [];
+      // Only an ARRAY container is a model list. `data.data` can be a status string on a
+      // degraded 200, and a string has a truthy `.length`, which would slip past the
+      // empty-catalog guard and be coerced to `[]` downstream.
+      const models = Array.isArray(data.data)
+        ? data.data
+        : Array.isArray(data.models)
+          ? data.models
+          : [];
       // Pass the raw body so the helper can tell "upstream answered with an empty catalog"
       // from "upstream answered with something that is not a catalog". The helper owns the
       // decision; a second inline copy of the rule is how the sites drifted apart before.

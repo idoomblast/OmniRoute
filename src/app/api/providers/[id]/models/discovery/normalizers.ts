@@ -71,26 +71,95 @@ const CATALOG_CONTAINER_KEYS = [
 const ERROR_ENVELOPE_KEYS = ["error", "errors", "fault", "detail"] as const;
 
 /**
+ * Whether a value is a model entry — an object something model-shaped, i.e. it carries a
+ * string `id` (or `name`, which a few catalogs use as the identity).
+ */
+function looksLikeModelEntry(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const entry = value as Record<string, unknown>;
+  return typeof entry.id === "string" || typeof entry.name === "string";
+}
+
+/**
+ * Whether the value under a catalog container key is actually a catalog.
+ *
+ * This is CONTENT-aware on purpose. A container key being present with an object under it
+ * proves nothing: `{"data":{"error":{"code":429}}}` is an error envelope wrapped in the
+ * provider's normal container, and reading it as "the account has nothing" deletes a healthy
+ * catalog behind a 200. That is the round-5 BF-1 defect, still reachable in round 9 because the
+ * test was shape-aware (`typeof value === "object"`) rather than content-aware.
+ *
+ * Accepted shapes:
+ *   - an ARRAY (any length — an empty one is a real, authoritative answer)
+ *   - an id→model MAP whose values are model-shaped objects (any count, including zero)
+ * Everything else — a string, a number, a nested error envelope, `{}`, `{error:...}` — is not
+ * a catalog and must not be read as an empty one.
+ */
+function isCatalogContainerValue(value: unknown, key: string, depth = 0): boolean {
+  if (Array.isArray(value)) return true;
+  if (typeof value !== "object" || value === null) return false;
+  // A nested error envelope is not a catalog, whatever container it hides in.
+  if (hasErrorEnvelopeDeep(value)) return false;
+  const record = value as Record<string, unknown>;
+  const entries = Object.values(record);
+
+  if (entries.length === 0) {
+    // `{"models":{}}` is the documented id→model map with zero entries — a real answer.
+    // `{"data":{}}` is not: every parser reads `data` as an ARRAY, so an empty object there
+    // carries no catalog at all and must not be read as an empty account.
+    return key === "models";
+  }
+
+  // A DIRECT id→model map (`{"models":{"glm-5":{...}}}`).
+  if (entries.every(looksLikeModelEntry)) return true;
+
+  // A catalog wrapped one envelope deeper — `{"data":{"data":[...]}}` (zai-web) and
+  // `{"data":{"models":[...]}}` — is still a catalog. Bounded depth so a pathological body
+  // cannot recurse forever, and the nested value must satisfy the same content test.
+  if (depth < 2) {
+    for (const containerKey of CATALOG_CONTAINER_KEYS) {
+      if (!(containerKey in record)) continue;
+      if (isCatalogContainerValue(record[containerKey], containerKey, depth + 1)) return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Whether an error envelope appears at this level, in any of the dialects these providers speak
+ * (REST `error`/`errors`, GCP `fault`, FastAPI `detail`), OR nested one container level down
+ * under a known catalog key (`{"data":{"error":...}}`).
+ */
+function hasErrorEnvelopeDeep(payload: unknown): boolean {
+  if (hasErrorEnvelope(payload)) return true;
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return false;
+  const record = payload as Record<string, unknown>;
+  return CATALOG_CONTAINER_KEYS.some((key) => key in record && hasErrorEnvelope(record[key]));
+}
+
+/**
  * Whether a catalog payload actually carries a models collection.
  *
  * Callers use this to SKIP an endpoint instead of answering "the account has nothing" — that
  * answer clears the stored catalog behind a 200 with no call log.
  *
- * The test is POSITIVE: a known catalog container must be present. An earlier version accepted
- * "any top-level array or object", which read error envelopes as catalogs — `{"errors":[...]}`,
- * `{"fault":{...}}` and `{"message":...,"code":...}` all parsed to `[]` and wiped a healthy
- * catalog on a 200 (round-7 BF-2). A container that is present but empty IS a real answer
- * (the account has nothing), so emptiness is accepted as long as the key is one of ours.
+ * The test is POSITIVE and CONTENT-aware: a known catalog container must be present AND must
+ * hold something catalog-shaped. Earlier versions were progressively less wrong:
+ *   - "any top-level array or object" accepted `{"errors":[...]}` and `{"fault":{...}}`
+ *   - "any object under a known key" accepted `{"data":{"error":{...}}}`
+ * Both read as empty catalogs and wiped healthy ones. Presence of a key is not evidence.
  */
 export function hasCatalogCollection(payload: unknown): boolean {
   // A bare array is the whole catalog (AI/ML API answers with a top-level list).
   if (Array.isArray(payload)) return true;
   const record = asRecord(payload);
-  return CATALOG_CONTAINER_KEYS.some((key) => {
-    if (!(key in record)) return false;
-    const value = record[key];
-    return Array.isArray(value) || (typeof value === "object" && value !== null);
-  });
+  // An error envelope at the top level is never a catalog, even when a container key is also
+  // present (`{"data": [], "error": {...}}` answers an error, not an empty account).
+  if (hasErrorEnvelope(record)) return false;
+  return CATALOG_CONTAINER_KEYS.some(
+    (key) => key in record && isCatalogContainerValue(record[key], key)
+  );
 }
 
 /**
