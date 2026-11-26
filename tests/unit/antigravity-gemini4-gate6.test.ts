@@ -26,7 +26,7 @@ const { persistDiscoveredModels } = await import("../../src/lib/providerModels/m
 const { getSyncedAvailableModelsForConnection } = await import("../../src/lib/db/models.ts");
 const core = await import("../../src/lib/db/core.ts");
 const antigravityVersion = await import("../../open-sse/services/antigravityVersion.ts");
-const { hasCatalogCollection, hasErrorEnvelope } =
+const { hasCatalogCollection, hasErrorEnvelope, catalogParseDiverges } =
   await import("../../src/app/api/providers/[id]/models/discovery/normalizers.ts");
 
 const originalFetch = globalThis.fetch;
@@ -297,6 +297,11 @@ test("BF-1: a nested error envelope is not a catalog, at any container depth", (
     { data: [], Status: "error" },
     { data: [], whatever: "boom" },
     { data: [], reason: { why: "quota" } },
+    // NON-empty error envelopes are still errors — the emptiness fix must not go too far.
+    { data: [], errors: [{ code: 429 }] },
+    { data: [], error: { code: 429 } },
+    { data: [], detail: "quota exceeded" },
+    { data: [], error: true },
     // An empty container must not launder a sibling that is really an error envelope. Both keys
     // here are catalog containers, so the per-key "persists nothing" path handles them; the
     // shape check is what refuses it.
@@ -349,6 +354,14 @@ test("BF-1: real catalog shapes are still catalogs, including empty ones and nes
     { data: [], has_more: false },
     { data: [], note: null, next: null },
     { data: [], meta: {} },
+    // An EMPTY error envelope is not an error. Cloudflare Workers AI sends
+    // `{result, success, errors: [], messages: []}` on EVERY successful response; counting
+    // `errors: []` as a failure rejected the live catalog and served the local fallback.
+    { data: [], errors: [] },
+    { data: [], error: {} },
+    { data: [], detail: {} },
+    { data: [], error: "" },
+    { data: [], error: null },
     // Real models win over junk in a sibling container.
     { data: [{ message: "quota" }], models: [{ id: "real" }] },
   ];
@@ -707,3 +720,200 @@ test("BF-1: a shape-valid empty catalog with a benign pagination envelope still 
 // row count says nothing about the classifier. The property that matters — a nested real catalog
 // is NOT mistaken for an empty or broken body — belongs on the classifier, and is covered by the
 // `{data:{data:[...]}}` / `{data:{models:[...]}}` fixtures in the positive set above.
+
+// ---------------------------------------------------------------------------
+// Round 14 — the emptiness rule must not reject a REAL success envelope.
+//
+// Cloudflare Workers AI answers every SUCCESSFUL discovery with
+// `{result: [...], success: true, errors: [], messages: []}`. Counting `errors: []` as an error
+// envelope made the guard reject the live catalog at every site and serve the 13-entry local
+// fallback instead — a silent regression that the existing Cloudflare test never saw because its
+// fixture omitted the field. This is the inverse risk of default-deny: refusing too much.
+// ---------------------------------------------------------------------------
+
+test("BF-1: a Cloudflare success envelope is a catalog, not an error", async () => {
+  await resetStorage();
+  const connectionId = await seedConnection("cloudflare-ai", "cf-envelope", {
+    accountId: "acc-test",
+  });
+
+  globalThis.fetch = (async () =>
+    jsonResponse({
+      result: [{ id: "uuid-1", name: "@cf/meta/llama-3-8b-instruct" }],
+      success: true,
+      errors: [],
+      messages: [],
+    })) as typeof fetch;
+
+  const route = await import("../../src/app/api/providers/[id]/models/route.ts");
+  const res = await route.GET(
+    new Request(`http://localhost/api/providers/${connectionId}/models?refresh=true`),
+    { params: Promise.resolve({ id: connectionId }) }
+  );
+  const body = (await res.json()) as { source?: string; models?: Array<{ id: string }> };
+
+  assert.equal(res.status, 200);
+  assert.equal(body.source, "api", "the live Cloudflare catalog must be used, not the fallback");
+  assert.deepEqual(
+    (body.models ?? []).map((model) => model.id),
+    ["@cf/meta/llama-3-8b-instruct"]
+  );
+});
+
+test("BF-1: an empty error envelope does not make a real catalog an error", () => {
+  // The classifier level, for every spelling of "empty".
+  for (const body of [
+    { result: [{ name: "@cf/x" }], success: true, errors: [], messages: [] },
+    { data: [{ id: "a" }], error: {} },
+    { data: [{ id: "a" }], detail: {} },
+    { data: [{ id: "a" }], error: "" },
+    { data: [{ id: "a" }], error: null },
+    { data: [{ id: "a" }], error: false },
+  ]) {
+    assert.equal(hasErrorEnvelope(body), false, JSON.stringify(body));
+    assert.equal(hasCatalogCollection(body), true, JSON.stringify(body));
+  }
+});
+
+test("BF-1: a NON-empty error envelope is still an error", () => {
+  for (const body of [
+    { data: [], errors: [{ code: 429 }] },
+    { data: [], error: { code: 429 } },
+    { data: [], detail: "quota exceeded" },
+    { data: [], error: true },
+    { data: [], fault: { faultstring: "nope" } },
+  ]) {
+    assert.equal(hasErrorEnvelope(body), true, JSON.stringify(body));
+    assert.equal(hasCatalogCollection(body), false, JSON.stringify(body));
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Round 14, BF-3 — a body can carry a model that its own parser cannot read.
+//
+// `hasCatalogCollection` is a BODY-level question: it hunts the whole envelope for something
+// model-shaped. Each provider's parser reads ONE key (`data.data`, `data.models`, `result`, ...).
+// `{"data": [], "models": [{"id":"x"}]}` therefore passes the guard and parses to zero, and the
+// route then persisted that zero — deleting the rows the body was carrying while answering 200.
+// The guard must ask whether the parse agrees with the body, not only whether the body looks like
+// a catalog.
+// ---------------------------------------------------------------------------
+
+test("BF-3: the divergence helper only fires when models exist that the parse did not see", () => {
+  const carrying = [
+    { data: [], models: [{ id: "x" }] },
+    { data: [], result: [{ id: "x" }] },
+    { data: [], data2: undefined, models: [{ name: "x" }] },
+    { result: [{ model: "x" }], success: true, errors: [] },
+  ];
+  for (const body of carrying) {
+    assert.equal(catalogParseDiverges(body, 0), true, JSON.stringify(body));
+    // A successful parse is never a divergence.
+    assert.equal(catalogParseDiverges(body, 1), false, JSON.stringify(body));
+  }
+  const genuinelyEmpty = [{ data: [] }, { models: [] }, { data: [], success: true, errors: [] }];
+  for (const body of genuinelyEmpty) {
+    assert.equal(catalogParseDiverges(body, 0), false, JSON.stringify(body));
+  }
+});
+
+for (const provider of GENERIC_PARSE_PROVIDERS) {
+  test(`BF-3: ${provider} keeps its rows when the body carries an unparseable model`, async () => {
+    await resetStorage();
+    const connectionId = await seedConnection(provider, `bf3-${provider}`);
+    await seedCatalog(provider, connectionId);
+
+    // `data.data` is an array, so the generic parser takes it — and it is empty. The only model
+    // in the body sits under a key that parser never reads.
+    globalThis.fetch = (async () =>
+      jsonResponse({ data: [], models: [{ id: "unparseable-model" }] })) as typeof fetch;
+
+    const route = await import("../../src/app/api/providers/[id]/models/route.ts");
+    const res = await route.GET(
+      new Request(`http://localhost/api/providers/${connectionId}/models?refresh=true`),
+      { params: Promise.resolve({ id: connectionId }) }
+    );
+    const body = (await res.json()) as { models?: unknown[] };
+
+    const rows = await getSyncedAvailableModelsForConnection(provider, connectionId);
+    assert.equal(rows.length, 2, `${provider} catalog must survive a body/parser divergence`);
+    assert.notEqual(body.models?.length, 0, `${provider} must not answer an empty catalog`);
+  });
+}
+
+test("BF-3: POST /sync-models does not persist the divergent empty either", async () => {
+  const provider = "glm";
+  await resetStorage();
+  const connectionId = await seedConnection(provider, "bf3-sync");
+  await seedCatalog(provider, connectionId);
+
+  // The sync route re-reads the probe over loopback, so the mock must serve the REAL models
+  // handler for that call and only fake the upstream. A blanket mock would hand the raw body to
+  // the sync route as if it were a discovery response, which is not what production does.
+  const body = { data: [], models: [{ id: "unparseable-model" }] };
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("/api/providers/") && url.includes("/models?")) {
+      const parsed = new URL(url);
+      return providersRoute.GET(new Request(`http://localhost${parsed.pathname}${parsed.search}`), {
+        params: Promise.resolve({ id: parsed.pathname.split("/")[3] }),
+      });
+    }
+    if (url.includes("__readiness")) return new Response(null, { status: 404 });
+    return jsonResponse(body);
+  }) as typeof fetch;
+
+  const route = await import("../../src/app/api/providers/[id]/sync-models/route.ts");
+  await route.POST(
+    new Request(`http://localhost/api/providers/${connectionId}/sync-models`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    }),
+    { params: Promise.resolve({ id: connectionId }) }
+  );
+
+  const rows = await getSyncedAvailableModelsForConnection(provider, connectionId);
+  assert.equal(rows.length, 2, "sync must not persist a parser artefact as an empty catalog");
+});
+
+test("BF-3: a genuinely empty catalog still clears stale rows", async () => {
+  const provider = "glm";
+  await resetStorage();
+  const connectionId = await seedConnection(provider, "bf3-empty");
+  await seedCatalog(provider, connectionId);
+
+  // No model anywhere and a benign envelope: this IS the account saying "I have nothing".
+  globalThis.fetch = (async () => jsonResponse({ data: [] })) as typeof fetch;
+
+  const route = await import("../../src/app/api/providers/[id]/models/route.ts");
+  await route.GET(
+    new Request(`http://localhost/api/providers/${connectionId}/models?refresh=true`),
+    { params: Promise.resolve({ id: connectionId }) }
+  );
+
+  const rows = await getSyncedAvailableModelsForConnection(provider, connectionId);
+  assert.equal(rows.length, 0, "an authoritative empty answer must still clear the catalog");
+});
+
+test("BF-1: an explicit `error: false` next to an empty catalog is a real empty catalog", () => {
+  // The OpenAI-dialect spelling several proxies emit. `false` is the statement "no error", but
+  // the benign-envelope rule only knew about pagination flags, so this refused a legitimate
+  // empty answer and kept stale rows forever.
+  for (const body of [
+    { data: [], error: false },
+    { data: [], errors: false },
+    { result: [], success: true, errors: [], messages: [] },
+  ]) {
+    assert.equal(hasErrorEnvelope(body), false, JSON.stringify(body));
+    assert.equal(hasCatalogCollection(body), true, JSON.stringify(body));
+  }
+  // …while a truthy flag or a message next to the empty list is still an error report.
+  for (const body of [
+    { data: [], error: true },
+    { data: [], message: "Quota exceeded" },
+    { data: [], code: 429 },
+  ]) {
+    assert.equal(hasCatalogCollection(body), false, JSON.stringify(body));
+  }
+});

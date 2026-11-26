@@ -109,6 +109,7 @@ import {
   fetchAntigravityDiscoveryModelsCached,
   hasCatalogCollection,
   hasErrorEnvelope,
+  catalogParseDiverges,
   mergeLastKnownTiers,
   normalizeDataRobotCatalogResponse,
   normalizeOpenAiLikeModelsResponse,
@@ -499,16 +500,21 @@ export async function GET(
       // looks at a length.
       const isModelList = Array.isArray(models);
       const authoritativeEmpty = extraPayload.authoritativeEmpty === true;
-      const payloadProvesCatalog =
-        sourcePayload !== undefined &&
-        !hasErrorEnvelope(sourcePayload) &&
-        hasCatalogCollection(sourcePayload);
       // Count what would actually PERSIST, not what was handed in. `[{error:{...}}]` and
       // `["Service unavailable"]` are length 1 but normalize to zero models; using the raw
       // length skipped this guard and let `persistDiscoveredModels` delete every row behind a
       // 200. `normalizeDiscoveredModels` is the same function the write path uses, so this is
       // the only count that answers "will this wipe the catalog".
       const persistableCount = isModelList ? normalizeDiscoveredModels(models).length : 0;
+      // `hasCatalogCollection` is a body-level test, and a body can carry models in a key this
+      // provider's parser never reads. When that happens the parse is empty while the payload is
+      // not, and excusing the empty parse deletes the rows the body was carrying. Only a body
+      // that genuinely carries NO model anywhere may back an authoritative empty answer.
+      const payloadProvesCatalog =
+        sourcePayload !== undefined &&
+        !hasErrorEnvelope(sourcePayload) &&
+        hasCatalogCollection(sourcePayload) &&
+        !catalogParseDiverges(sourcePayload, persistableCount);
       if (
         !isModelList ||
         (persistableCount === 0 && !authoritativeEmpty && !payloadProvesCatalog)
@@ -949,7 +955,9 @@ export async function GET(
             // nothing, so a raw `.length === 0` test let it break the loop as "success".
             if (
               normalizeDiscoveredModels(payloadModels).length === 0 &&
-              (hasErrorEnvelope(data) || !hasCatalogCollection(data))
+              (hasErrorEnvelope(data) ||
+                !hasCatalogCollection(data) ||
+                catalogParseDiverges(data, 0))
             ) {
               console.warn(
                 `[models] ${provider}: ${modelsUrl} answered 200 without a catalog collection — ignoring`
@@ -1706,7 +1714,10 @@ export async function GET(
       // Pass the raw body so the helper can tell "upstream answered with an empty catalog"
       // from "upstream answered with something that is not a catalog". The helper owns the
       // decision; a second inline copy of the rule is how the sites drifted apart before.
-      if (models.length === 0 && (hasErrorEnvelope(data) || !hasCatalogCollection(data))) {
+      if (
+        models.length === 0 &&
+        (hasErrorEnvelope(data) || !hasCatalogCollection(data) || catalogParseDiverges(data, 0))
+      ) {
         console.warn(
           `[models] ${provider}: 200 without a catalog collection — not treating it as empty`
         );
@@ -2178,7 +2189,10 @@ export async function GET(
       // Pass the raw body so the helper can tell "upstream answered with an empty catalog"
       // from "upstream answered with something that is not a catalog". The helper owns the
       // decision; a second inline copy of the rule is how the sites drifted apart before.
-      if (models.length === 0 && (hasErrorEnvelope(data) || !hasCatalogCollection(data))) {
+      if (
+        models.length === 0 &&
+        (hasErrorEnvelope(data) || !hasCatalogCollection(data) || catalogParseDiverges(data, 0))
+      ) {
         console.warn(
           `[models] ${provider}: 200 without a catalog collection — not treating it as empty`
         );
@@ -2419,6 +2433,7 @@ export async function GET(
     }
 
     let allModels: any[] = [];
+    let parserDiverged = false;
     let pageUrl = url;
     let pageCount = 0;
     const MAX_PAGES = 20; // Safety limit
@@ -2465,6 +2480,11 @@ export async function GET(
         return NextResponse.json({ error: "Provider returned no model catalog" }, { status: 502 });
       }
       const pageModels = config.parseResponse(data);
+      // The loop guard above only proves the BODY carries a catalog. If this provider's parser
+      // reads a different key than the one carrying the models, `pageModels` is empty while the
+      // body is not — and the `authoritativeEmpty` flag below would then delete every stored row
+      // on a completed pagination. Divergence is not an empty account.
+      if (catalogParseDiverges(data, pageModels.length)) parserDiverged = true;
       allModels = allModels.concat(pageModels);
 
       const nextPageToken = data.nextPageToken;
@@ -2487,8 +2507,11 @@ export async function GET(
     }
 
     // Every page in the loop above was validated before its models were concatenated, so a
-    // completed pagination is an authoritative answer even when the total is zero.
-    return buildApiDiscoveryResponse(allModels, undefined, { authoritativeEmpty: true });
+    // completed pagination is an authoritative answer even when the total is zero — unless a page
+    // carried models its parser could not read, which makes the zero a parser artefact.
+    return buildApiDiscoveryResponse(allModels, undefined, {
+      authoritativeEmpty: !parserDiverged,
+    });
   } catch (error) {
     if (error instanceof SafeOutboundFetchError && error.code === "URL_GUARD_BLOCKED") {
       return NextResponse.json({ error: sanitizeErrorMessage(error.message) }, { status: 400 });

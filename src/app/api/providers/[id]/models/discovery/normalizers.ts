@@ -195,6 +195,12 @@ const BENIGN_FALSE_KEYS = new Set([
   "hasnext",
   "incomplete",
   "truncated",
+  // `error: false` is the explicit statement that there is no error — the OpenAI-dialect
+  // spelling several proxies emit. It was the one non-empty-looking key that still refused a
+  // legitimately empty catalog.
+  "error",
+  "errors",
+  "fault",
 ]);
 
 /**
@@ -321,6 +327,24 @@ export function hasCatalogCollection(payload: unknown): boolean {
 }
 
 /**
+ * Whether the PARSED model list contradicts the body that produced it.
+ *
+ * `hasCatalogCollection` answers a body-level question — "does this payload carry models
+ * somewhere in a known container?" — which is the right test for deciding whether an endpoint
+ * answered at all. It is NOT the same question as "did the parser read them": each provider
+ * reads one specific key (`data.data`, `data.models`, `result`, ...).
+ *
+ * `{"data": [], "models": [{"id":"x"}]}` answers BOTH true to "carries a catalog" and zero to
+ * the generic parser, because `data.data` is an array and therefore wins the branch. Reading that
+ * emptying as an authoritative "this account has no models" deletes the very rows the body was
+ * carrying — the exact failure the catalog guards exist to prevent, arrived at from the inside.
+ * Every empty-decision site must ask THIS question after parsing, not just the body-level one.
+ */
+export function catalogParseDiverges(payload: unknown, parsedCount: number): boolean {
+  return parsedCount === 0 && persistsAnyModel(payload, 0);
+}
+
+/**
  * Whether a payload carries an error envelope instead of a catalog. Providers answer 200
  * with an error often enough that a parser reading `data.data || data.models || []` turns it
  * into an empty catalog; callers check this before acting on that emptiness.
@@ -328,9 +352,19 @@ export function hasCatalogCollection(payload: unknown): boolean {
 export function hasErrorEnvelope(payload: unknown): boolean {
   const record = asRecord(payload);
   return ERROR_ENVELOPE_KEYS.some((key) => {
+    if (!(key in record)) return false;
     const value = record[key];
+    if (value === null || value === undefined) return false;
     if (typeof value === "string") return value.trim().length > 0;
-    return typeof value === "object" && value !== null;
+    if (typeof value === "boolean") return value === true;
+    if (typeof value === "number") return value !== 0;
+    // An EMPTY container carries no error. This matters concretely: Cloudflare Workers AI
+    // answers every SUCCESSFUL response with `{result:[...], success:true, errors:[], messages:[]}`,
+    // so counting `errors: []` as a failure rejected the live catalog for that provider at every
+    // guard site and silently served the 13-entry local fallback instead. `{"error":{}}` and
+    // `{"detail":{}}` are equally empty.
+    if (Array.isArray(value)) return value.length > 0;
+    return typeof value === "object" && Object.keys(value as Record<string, unknown>).length > 0;
   });
 }
 
