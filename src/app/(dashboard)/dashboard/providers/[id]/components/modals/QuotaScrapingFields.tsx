@@ -4,12 +4,14 @@ import { Input } from "@/shared/components";
 import { providerText, type ProviderMessageTranslator } from "../../providerPageHelpers";
 
 export type QuotaScrapingFieldValues = {
+  kenariSessionCookie: string;
   opencodeGoWorkspaceId: string;
   opencodeGoAuthCookie: string;
   ollamaCloudUsageCookie: string;
 };
 
 export const EMPTY_QUOTA_SCRAPING_FIELDS: QuotaScrapingFieldValues = {
+  kenariSessionCookie: "",
   opencodeGoWorkspaceId: "",
   opencodeGoAuthCookie: "",
   ollamaCloudUsageCookie: "",
@@ -20,7 +22,11 @@ export function assignQuotaScrapingProviderData(
   values: QuotaScrapingFieldValues,
   target: Record<string, unknown>
 ) {
-  if (provider === "opencode-go") {
+  if (provider === "kenari") {
+    if (values.kenariSessionCookie.trim()) {
+      target.kenariSessionCookie = values.kenariSessionCookie.trim();
+    }
+  } else if (provider === "opencode-go") {
     target.opencodeGoWorkspaceId = values.opencodeGoWorkspaceId.trim() || undefined;
     if (values.opencodeGoAuthCookie.trim()) {
       target.opencodeGoAuthCookie = values.opencodeGoAuthCookie.trim();
@@ -45,6 +51,31 @@ export default function QuotaScrapingFields({
   t,
   editMode = false,
 }: QuotaScrapingFieldsProps) {
+  if (provider === "kenari") {
+    return (
+      <div className="flex flex-col gap-3 rounded-lg border border-border/50 bg-surface/20 p-4">
+        <Input
+          label={providerText(t, "kenariSessionCookieLabel", "Kenari session cookie")}
+          name="kenariSessionCookie"
+          type="password"
+          value={values.kenariSessionCookie}
+          onChange={(e) => onChange({ kenariSessionCookie: e.target.value })}
+          placeholder="__Host-kn_session=..."
+          hint={providerText(
+            t,
+            "kenariSessionCookieHint",
+            editMode
+              ? "Leave blank to keep the stored cookie. Paste __Host-kn_session=... (or the full Cookie header) from kenari.id to replace it."
+              : "Required for quota. Copy the __Host-kn_session cookie from kenari.id (DevTools → Application → Cookies). The API key cannot read subscription quota."
+          )}
+          autoComplete="off"
+          spellCheck={false}
+          autoCapitalize="off"
+        />
+      </div>
+    );
+  }
+
   if (provider === "opencode-go") {
     return (
       <div className="flex flex-col gap-3 rounded-lg border border-border/50 bg-surface/20 p-4">
