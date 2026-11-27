@@ -10281,6 +10281,7 @@
       "tokens": "Tokens",
       "compressed": "Kompresi",
       "tps": "TPS",
+      "ttft": "TTFT",
       "duration": "Duration",
       "time": "Time"
     },

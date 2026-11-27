@@ -27,6 +27,7 @@ import {
   formatApiKeyLabel,
 } from "@/shared/utils/formatting";
 import { getProviderDisplayLabel } from "@/shared/utils/providerDisplayLabel";
+import { buildLogTpsTitle, computeLogTps } from "@/shared/utils/logTps";
 import useEmailPrivacyStore from "@/store/emailPrivacyStore";
 import {
   computeLogsSignature,
@@ -58,11 +59,9 @@ function getLogTotalTokens(log) {
   return (log?.tokens?.in || 0) + (log?.tokens?.out || 0);
 }
 
+// #13130: generation-time TPS (duration - TTFT, reasoning-aware); see logTps.ts.
 function getLogTps(log): number {
-  const tokensOut = log?.tokens?.out || 0;
-  const durationMs = log?.duration || 0;
-  if (tokensOut <= 0 || durationMs <= 0) return 0;
-  return tokensOut / (durationMs / 1000);
+  return computeLogTps(log?.tokens?.out, log?.tokens?.reasoning, log?.duration, log?.ttft);
 }
 
 function formatTps(tps: number): string {
@@ -122,6 +121,7 @@ const RequestLoggerV2 = forwardRef<RequestLoggerV2Handle, { initialSelectedId?: 
         { key: "combo", label: t("columns.combo") },
         { key: "tokens", label: t("columns.tokens") },
         { key: "tps", label: t("columns.tps") },
+        { key: "ttft", label: t("columns.ttft") },
         { key: "duration", label: t("columns.duration") },
         { key: "time", label: t("columns.time") },
       ],
@@ -190,6 +190,10 @@ const RequestLoggerV2 = forwardRef<RequestLoggerV2Handle, { initialSelectedId?: 
 
     const [visibleColumns, setVisibleColumns] = useState(() => {
       const defaultVisible = Object.fromEntries(columns.map((c) => [c.key, true]));
+      // #13130: TTFT only exists for streaming rows written after the ttft_ms
+      // migration, so old rows would show "—". Keep it opt-in; users who care
+      // about the breakdown can enable it from the column picker.
+      defaultVisible.ttft = false;
       if (globalThis.window === undefined) return defaultVisible;
       try {
         const saved = localStorage.getItem("loggerVisibleColumns");
@@ -1222,6 +1226,9 @@ const RequestLoggerV2 = forwardRef<RequestLoggerV2Handle, { initialSelectedId?: 
                         {getSortIndicator("tps")}
                       </th>
                     )}
+                    {visibleColumns.ttft && (
+                      <th className={LOG_TABLE_HEADER_CELL_RIGHT_CLASS}>{t("columns.ttft")}</th>
+                    )}
                     {visibleColumns.duration && (
                       <th
                         className={`${LOG_TABLE_HEADER_CELL_RIGHT_CLASS} cursor-pointer select-none`}
@@ -1545,12 +1552,20 @@ const RequestLoggerV2 = forwardRef<RequestLoggerV2Handle, { initialSelectedId?: 
                                         ? "text-sky-600 dark:text-sky-400"
                                         : "text-amber-600 dark:text-amber-400";
                                 return (
-                                  <span className={color} title={`${tps.toFixed(2)} tokens/sec`}>
+                                  <span
+                                    className={color}
+                                    title={buildLogTpsTitle(log, tps, formatDuration)}
+                                  >
                                     {formatTps(tps)}
                                   </span>
                                 );
                               })()
                             )}
+                          </td>
+                        )}
+                        {visibleColumns.ttft && (
+                          <td className="px-3 py-2 text-right text-text-muted font-mono">
+                            {formatDuration(log.ttft > 0 ? log.ttft : null)}
                           </td>
                         )}
                         {visibleColumns.duration && (
